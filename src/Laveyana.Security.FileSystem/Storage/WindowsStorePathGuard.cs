@@ -1,10 +1,13 @@
 using System.Runtime.Versioning;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 using System.Security.AccessControl;
 using System.Security.Principal;
 
 namespace Laveyana.Security.FileSystem.Storage;
 
-/// <summary>Strict Windows ACL/owner preflight; this is not handle-relative anti-race I/O.</summary>
+/// <summary>Windows owner/ACL validation for the experimental filesystem backend.</summary>
+/// <remarks>EXPERIMENTAL / TEST ONLY. Native handle validation needs Windows adversarial tests.</remarks>
 [SupportedOSPlatform("windows")]
 internal static class WindowsStorePathGuard
 {
@@ -59,6 +62,38 @@ internal static class WindowsStorePathGuard
         ValidateAcl(FileSystemAclExtensions.GetAccessControl(new FileInfo(path)), true);
     }
 
+    /// <summary>Checks ACL/owner on the object actually opened through its native handle.</summary>
+    internal static void ValidateHandle(SafeFileHandle handle, bool directory)
+    {
+        const int SeFileObject = 1;
+        const int OwnerAndDacl = 1 | 4;
+        uint error = GetSecurityInfo(handle, SeFileObject, OwnerAndDacl,
+            out _, out _, out _, out _, out nint descriptor);
+        if (error != 0)
+        {
+            throw new UnauthorizedAccessException($"Cannot inspect store handle security (error {error}).");
+        }
+
+        try
+        {
+            uint length = GetSecurityDescriptorLength(descriptor);
+            if (length is < 20 or > 65536)
+            {
+                throw new UnauthorizedAccessException("Invalid store security descriptor size.");
+            }
+
+            byte[] binary = new byte[checked((int)length)];
+            Marshal.Copy(descriptor, binary, 0, binary.Length);
+            FileSystemSecurity security = directory ? new DirectorySecurity() : new FileSecurity();
+            security.SetSecurityDescriptorBinaryForm(binary);
+            ValidateAcl(security, isolated: true);
+        }
+        finally
+        {
+            _ = LocalFree(descriptor);
+        }
+    }
+
     private static void ValidateEntry(string path, bool directory)
     {
         FileAttributes attributes = File.GetAttributes(path);
@@ -68,6 +103,17 @@ internal static class WindowsStorePathGuard
             throw new IOException("Redirected or incorrectly typed store path is not trusted.");
         }
     }
+
+    [DllImport("advapi32.dll", ExactSpelling = true)]
+    private static extern uint GetSecurityInfo(SafeFileHandle handle, int objectType,
+        int securityInformation, out nint owner, out nint group, out nint dacl,
+        out nint sacl, out nint securityDescriptor);
+
+    [DllImport("advapi32.dll", ExactSpelling = true)]
+    private static extern uint GetSecurityDescriptorLength(nint securityDescriptor);
+
+    [DllImport("kernel32.dll", ExactSpelling = true)]
+    private static extern nint LocalFree(nint memory);
 
     private static void ValidateAcl(FileSystemSecurity descriptor, bool isolated)
     {

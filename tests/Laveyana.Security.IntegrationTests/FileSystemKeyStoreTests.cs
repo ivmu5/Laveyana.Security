@@ -17,7 +17,7 @@ using Laveyana.Security.Software;
 namespace Laveyana.Security.IntegrationTests;
 
 [TestFixture]
-public sealed class FileSystemKeyStoreTests
+public sealed partial class FileSystemKeyStoreTests
 {
     private string _root = null!;
     private TestProtector _protector = null!;
@@ -432,6 +432,182 @@ public sealed class FileSystemKeyStoreTests
     [Category("WindowsOnly")]
     [Test]
     [SupportedOSPlatform("windows")]
+    public async Task WindowsSnapshotSymlinkIsRejectedWhenSupported()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Ignore("Windows reparse point test.");
+            return;
+        }
+
+        FileSystemKeyStore store = await Open();
+        string path = Path.Combine(_root, "store.lsfs");
+        string backup = Path.Combine(_root, "snapshot-backup.bin");
+        File.Move(path, backup);
+        try
+        {
+            try
+            {
+                File.CreateSymbolicLink(path, backup);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                Assert.Ignore("Creating Windows symlinks requires Developer Mode or SeCreateSymbolicLinkPrivilege.");
+                return;
+            }
+            catch (IOException exception) when (exception.HResult == unchecked((int)0x80070522))
+            {
+                // EXPERIMENTAL / TEST ONLY: Win32 ERROR_PRIVILEGE_NOT_HELD (1314).
+                // Do not treat any other IOException as an unsupported test environment.
+                Assert.Ignore("Windows refused symlink creation (privilege not held, Win32 1314). Enable Developer Mode to run this test.");
+                return;
+            }
+
+            Assert.ThrowsAsync<IOException>(async () =>
+                await store.FindByNameAsync(_provider, _name));
+        }
+        finally
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+
+            File.Move(backup, path);
+        }
+    }
+
+    [Category("WindowsOnly")]
+    [Test]
+    [SupportedOSPlatform("windows")]
+    public async Task WindowsExistingLockSymlinkIsRejectedWhenSupported()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Ignore("Windows reparse point test.");
+            return;
+        }
+
+        await Open();
+        string path = Path.Combine(_root, ".store.lock");
+        string backup = Path.Combine(_root, "lock-backup.bin");
+        File.Move(path, backup);
+        try
+        {
+            try
+            {
+                File.CreateSymbolicLink(path, backup);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                Assert.Ignore("Creating Windows symlinks requires Developer Mode or SeCreateSymbolicLinkPrivilege.");
+                return;
+            }
+            catch (IOException exception) when (exception.HResult == unchecked((int)0x80070522))
+            {
+                // EXPERIMENTAL / TEST ONLY: Win32 ERROR_PRIVILEGE_NOT_HELD (1314).
+                // Do not treat any other IOException as an unsupported test environment.
+                Assert.Ignore("Windows refused symlink creation (privilege not held, Win32 1314). Enable Developer Mode to run this test.");
+                return;
+            }
+
+            Assert.ThrowsAsync<IOException>(async () => await Open());
+        }
+        finally
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+
+            File.Move(backup, path);
+        }
+    }
+
+    [Category("WindowsOnly")]
+    [Test]
+    [SupportedOSPlatform("windows")]
+    public async Task WindowsRootDirectorySymlinkIsRejectedWhenSupported()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Ignore("Windows root reparse test.");
+            return;
+        }
+
+        await Open();
+        string alias = _root + "-alias";
+        try
+        {
+            try
+            {
+                Directory.CreateSymbolicLink(alias, _root);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                Assert.Ignore("Creating Windows symlinks requires Developer Mode or SeCreateSymbolicLinkPrivilege.");
+                return;
+            }
+            catch (IOException exception) when (exception.HResult == unchecked((int)0x80070522))
+            {
+                // EXPERIMENTAL / TEST ONLY: Win32 ERROR_PRIVILEGE_NOT_HELD (1314).
+                // Do not treat any other IOException as an unsupported test environment.
+                Assert.Ignore("Windows refused symlink creation (privilege not held, Win32 1314). Enable Developer Mode to run this test.");
+                return;
+            }
+
+            Assert.ThrowsAsync<IOException>(async () => await FileSystemKeyStore.OpenAsync(
+                new FileSystemKeyStoreOptions(alias), _protector));
+        }
+        finally
+        {
+            if (Directory.Exists(alias))
+            {
+                Directory.Delete(alias);
+            }
+        }
+    }
+
+    [Category("WindowsOnly")]
+    [Test]
+    [SupportedOSPlatform("windows")]
+    public async Task WindowsPinnedRootContinuesUsingOriginalDirectoryAfterRename()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Ignore("Windows directory handle test.");
+            return;
+        }
+
+        FileSystemKeyStore store = await Open();
+        string moved = _root + "-moved";
+        Directory.Move(_root, moved);
+        try
+        {
+            // Another directory now occupies the old path. The existing store must
+            // neither read nor write files into this replacement namespace.
+            Directory.CreateDirectory(_root);
+            KeyId key = KeyId.New();
+            Assert.That((await store.TryCreateAsync(await CreateRequest(key, _name))).Status,
+                Is.EqualTo(KeyStoreMutationStatus.Applied));
+            Assert.That(File.Exists(Path.Combine(moved, "store.lsfs")), Is.True);
+            Assert.That(File.Exists(Path.Combine(_root, "store.lsfs")), Is.False);
+            Assert.That((await store.FindByNameAsync(_provider, _name))!.KeyId, Is.EqualTo(key));
+        }
+        finally
+        {
+            if (Directory.Exists(_root))
+            {
+                Directory.Delete(_root, recursive: true);
+            }
+
+            Directory.Move(moved, _root);
+        }
+    }
+
+    [Category("WindowsOnly")]
+    [Test]
+    [SupportedOSPlatform("windows")]
     public async Task WindowsInheritOnlyGrantOnAncestorDoesNotInvalidateIsolatedStore()
     {
         if (!OperatingSystem.IsWindows())
@@ -642,6 +818,359 @@ public sealed class FileSystemKeyStoreTests
                 EnableExperimentalWrites = true,
                 ExpectedStoreInstanceId = actual
             }, router, new ProtectorReference("untrusted", 5)));
+    }
+
+    // EXPERIMENTAL / TEST ONLY — adversarial Windows filesystem tests.
+    // These deliberately mutate only disposable, per-test directories under the user's profile.
+    [Category("WindowsOnly")]
+    [Category("Adversarial")]
+    [Test]
+    [SupportedOSPlatform("windows")]
+    public async Task WindowsConcurrentWritesStayInPinnedRootAfterOriginalPathIsReplaced()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Ignore("Windows directory pinning stress test.");
+            return;
+        }
+
+        // EXPERIMENTAL / TEST ONLY. Use cooperative cancellation instead of
+        // NUnit's obsolete TimeoutAttribute (which cannot abort .NET threads).
+        // Await all started tasks before releasing disposable test directories.
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(30));
+
+        FileSystemKeyStore store = await Open();
+        string pinnedPath = _root + "-pinned";
+        Directory.Move(_root, pinnedPath);
+        try
+        {
+            // Put a decoy snapshot at the original name. Even with concurrent
+            // mutations, the live store must NEVER read, replace, or delete it.
+            Directory.CreateDirectory(_root);
+            string decoySnapshot = Path.Combine(_root, "store.lsfs");
+            byte[] marker = Encoding.ASCII.GetBytes("external-decoy-snapshot-DO-NOT-TOUCH");
+            await File.WriteAllBytesAsync(decoySnapshot, marker, timeout.Token);
+
+            const int mutations = 12;
+            var requests = new List<(KeyId Id, KeyName Name, KeyStoreCreateRequest Request)>();
+            for (int i = 0; i < mutations; i++)
+            {
+                KeyId id = KeyId.New();
+                KeyName name = new($"bound-{i}");
+                requests.Add((id, name, await CreateRequest(id, name)));
+            }
+
+            // Multiple operations on the SAME open store contend on its pinned
+            // lock entry while the old pathname points to an unrelated directory.
+            Task<KeyStoreMutationResult>[] writers = requests.Select(item => Task.Run(
+                async () => await store.TryCreateAsync(item.Request, timeout.Token))).ToArray();
+            KeyStoreMutationResult[] results = await Task.WhenAll(writers);
+            Assert.That(results.All(item => item.Status == KeyStoreMutationStatus.Applied), Is.True);
+
+            foreach (var item in requests)
+            {
+                KeyStoreEntry? entry = await store.FindByNameAsync(_provider, item.Name, timeout.Token);
+                Assert.That(entry, Is.Not.Null);
+                Assert.That(entry!.KeyId, Is.EqualTo(item.Id));
+            }
+
+            Assert.That(await File.ReadAllBytesAsync(decoySnapshot, timeout.Token), Is.EqualTo(marker),
+                "An operation reached the replacement pathname instead of the pinned root.");
+            Assert.That(File.Exists(Path.Combine(pinnedPath, "store.lsfs")), Is.True);
+            Assert.That(File.Exists(Path.Combine(_root, ".store.lock")), Is.False);
+        }
+        finally
+        {
+            if (Directory.Exists(_root))
+            {
+                Directory.Delete(_root, recursive: true);
+            }
+
+            Directory.Move(pinnedPath, _root);
+        }
+    }
+
+    [Category("WindowsOnly")]
+    [Category("Adversarial")]
+    [Test]
+    [SupportedOSPlatform("windows")]
+    public async Task WindowsConcurrentSnapshotSymlinkSwapNeverLoadsExternalData()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Ignore("Windows snapshot symlink race test.");
+            return;
+        }
+
+        // EXPERIMENTAL / TEST ONLY. Use cooperative cancellation instead of
+        // NUnit's obsolete TimeoutAttribute (which cannot abort .NET threads).
+        // Await all started tasks before releasing disposable test directories.
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(30));
+
+        FileSystemKeyStore store = await Open();
+        KeyId id = KeyId.New();
+        Assert.That((await store.TryCreateAsync(await CreateRequest(id, _name))).Status,
+            Is.EqualTo(KeyStoreMutationStatus.Applied));
+
+        string snapshot = Path.Combine(_root, "store.lsfs");
+        string backup = Path.Combine(_root, "snapshot-race-backup.bin");
+        string decoy = _root + "-outside-sentinel.bin";
+        string probe = Path.Combine(_root, ".symlink-capability-probe");
+        byte[] marker = Encoding.ASCII.GetBytes("outside-the-pinned-store-not-a-valid-snapshot");
+        await File.WriteAllBytesAsync(decoy, marker, timeout.Token);
+        try
+        {
+            // Verify support BEFORE starting concurrent tasks. Missing privilege is
+            // a platform skip, not a security pass. Other I/O errors remain failures.
+            try
+            {
+                File.CreateSymbolicLink(probe, decoy);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                Assert.Ignore("Windows symlink creation is not permitted in this test environment.");
+                return;
+            }
+            catch (IOException exception) when (exception.HResult == unchecked((int)0x80070522))
+            {
+                Assert.Ignore("Windows symlink privilege is missing (Win32 1314).");
+                return;
+            }
+            finally
+            {
+                if (File.Exists(probe))
+                {
+                    File.Delete(probe);
+                }
+            }
+
+            TaskCompletionSource<bool> start = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            int linked = 0;
+            int readSuccesses = 0;
+            int rejectedReads = 0;
+
+            Task attacker = Task.Run(async () =>
+            {
+                await start.Task.WaitAsync(timeout.Token);
+                for (int i = 0; i < 48; i++)
+                {
+                    timeout.Token.ThrowIfCancellationRequested();
+                    // An existing reader may briefly hold the entry. Try again
+                    // next round rather than treating a sharing conflict as a win.
+                    try
+                    {
+                        File.Move(snapshot, backup);
+                    }
+                    catch (IOException exception) when (exception.HResult == unchecked((int)0x80070020) ||
+                        exception.HResult == unchecked((int)0x80070021) ||
+                        exception.HResult == unchecked((int)0x80070002))
+                    {
+                        await Task.Yield();
+                        continue;
+                    }
+
+                    try
+                    {
+                        File.CreateSymbolicLink(snapshot, decoy);
+                        Interlocked.Increment(ref linked);
+                        await Task.Delay(1, timeout.Token);
+                    }
+                    finally
+                    {
+                        if (File.Exists(snapshot))
+                        {
+                            File.Delete(snapshot); // Deletes the link, not its target.
+                        }
+
+                        File.Move(backup, snapshot);
+                    }
+                }
+            });
+
+            Task reader = Task.Run(async () =>
+            {
+                await start.Task.WaitAsync(timeout.Token);
+                for (int i = 0; i < 160; i++)
+                {
+                    timeout.Token.ThrowIfCancellationRequested();
+                    try
+                    {
+                        KeyStoreEntry? entry = await store.FindByNameAsync(_provider, _name, timeout.Token);
+                        Assert.That(entry, Is.Not.Null);
+                        Assert.That(entry!.KeyId, Is.EqualTo(id));
+                        Interlocked.Increment(ref readSuccesses);
+                    }
+                    catch (IOException)
+                    {
+                        // Rejected link or transiently missing entry: fail closed.
+                        Interlocked.Increment(ref rejectedReads);
+                    }
+                }
+            });
+
+            start.SetResult(true);
+            await Task.WhenAll(attacker, reader);
+            Assert.That(linked, Is.GreaterThan(0), "The adversary never installed a test link.");
+            Assert.That(readSuccesses + rejectedReads, Is.EqualTo(160));
+            Assert.That(await File.ReadAllBytesAsync(decoy, timeout.Token), Is.EqualTo(marker),
+                "The outside test file was modified.");
+            Assert.That((await store.FindByNameAsync(_provider, _name, timeout.Token))!.KeyId, Is.EqualTo(id),
+                "The original authenticated snapshot must still be readable after the race.");
+        }
+        finally
+        {
+            if (File.Exists(probe))
+            {
+                File.Delete(probe);
+            }
+
+            // Restore only if an earlier failure interrupted the adversarial task.
+            if (File.Exists(backup))
+            {
+                if (File.Exists(snapshot))
+                {
+                    File.Delete(snapshot);
+                }
+
+                File.Move(backup, snapshot);
+            }
+
+            if (File.Exists(decoy))
+            {
+                File.Delete(decoy);
+            }
+        }
+    }
+
+    // EXPERIMENTAL / TEST ONLY: these tests construct real NTFS junctions in
+    // disposable per-test directories; they never mutate production storage.
+    [Category("WindowsOnly")]
+    [Category("Adversarial")]
+    [Test]
+    [SupportedOSPlatform("windows")]
+    public async Task WindowsJunctionRootAliasIsRejected()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Ignore("Windows NTFS junction test.");
+            return;
+        }
+
+        await Open();
+        string alias = _root + "-junction-alias";
+        try
+        {
+            WindowsJunctionTestSupport.CreateJunction(alias, _root);
+            Assert.That(File.GetAttributes(alias).HasFlag(FileAttributes.ReparsePoint), Is.True,
+                "Test precondition: the alias must really be a junction.");
+
+            Assert.ThrowsAsync<IOException>(async () => await FileSystemKeyStore.OpenAsync(
+                new FileSystemKeyStoreOptions(alias), _protector));
+        }
+        finally
+        {
+            WindowsJunctionTestSupport.DeleteJunctionIfPresent(alias);
+        }
+    }
+
+    [Category("WindowsOnly")]
+    [Category("Adversarial")]
+    [Test]
+    [SupportedOSPlatform("windows")]
+    public async Task WindowsJunctionInAncestorIsRejected()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Ignore("Windows NTFS junction ancestor test.");
+            return;
+        }
+
+        await Open();
+        string realParent = _root + "-junction-real-parent";
+        string aliasParent = _root + "-junction-alias-parent";
+        string relocatedRoot = Path.Combine(realParent, "store");
+        Directory.CreateDirectory(realParent);
+        Directory.Move(_root, relocatedRoot);
+        try
+        {
+            WindowsJunctionTestSupport.CreateJunction(aliasParent, realParent);
+            Assert.That(File.GetAttributes(aliasParent).HasFlag(FileAttributes.ReparsePoint), Is.True);
+
+            // The final component is a normal directory; only an ancestor is a junction.
+            Assert.ThrowsAsync<IOException>(async () => await FileSystemKeyStore.OpenAsync(
+                new FileSystemKeyStoreOptions(Path.Combine(aliasParent, "store")), _protector));
+        }
+        finally
+        {
+            WindowsJunctionTestSupport.DeleteJunctionIfPresent(aliasParent);
+            Directory.Move(relocatedRoot, _root);
+            Directory.Delete(realParent);
+        }
+    }
+
+    [Category("WindowsOnly")]
+    [Category("Adversarial")]
+    [Test]
+    [SupportedOSPlatform("windows")]
+    public async Task WindowsPinnedRootIgnoresReplacementJunctionDuringConcurrentWrites()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Ignore("Windows pinned-root junction test.");
+            return;
+        }
+
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(30));
+        FileSystemKeyStore store = await Open();
+        string moved = _root + "-pinned-for-junction";
+        string decoy = _root + "-external-junction-target";
+        Directory.CreateDirectory(decoy);
+        string sentinel = Path.Combine(decoy, "untouched.txt");
+        byte[] marker = Encoding.UTF8.GetBytes("junction-target-must-not-change");
+        await File.WriteAllBytesAsync(sentinel, marker, timeout.Token);
+        Directory.Move(_root, moved);
+        try
+        {
+            WindowsJunctionTestSupport.CreateJunction(_root, decoy);
+            Assert.That(File.GetAttributes(_root).HasFlag(FileAttributes.ReparsePoint), Is.True);
+
+            const int count = 12;
+            var requests = new List<(KeyId Id, KeyName Name, KeyStoreCreateRequest Request)>();
+            for (int i = 0; i < count; i++)
+            {
+                KeyId id = KeyId.New();
+                KeyName name = new($"junction-pinned-{i}");
+                requests.Add((id, name, await CreateRequest(id, name)));
+            }
+
+            // Writes race with each other, while the old path is a real junction
+            // to a different directory. All writes must remain bound to the handle.
+            Task<KeyStoreMutationResult>[] tasks = requests.Select(item => Task.Run(
+                async () => await store.TryCreateAsync(item.Request, timeout.Token),
+                timeout.Token)).ToArray();
+            KeyStoreMutationResult[] results = await Task.WhenAll(tasks);
+            Assert.That(results.All(r => r.Status == KeyStoreMutationStatus.Applied), Is.True);
+
+            foreach (var request in requests)
+            {
+                KeyStoreEntry? entry = await store.FindByNameAsync(_provider, request.Name, timeout.Token);
+                Assert.That(entry, Is.Not.Null);
+                Assert.That(entry!.KeyId, Is.EqualTo(request.Id));
+            }
+
+            Assert.That(await File.ReadAllBytesAsync(sentinel, timeout.Token), Is.EqualTo(marker));
+            Assert.That(Directory.GetFileSystemEntries(decoy), Is.EquivalentTo(new[] { sentinel }),
+                "The replacement junction's target must not receive store writes.");
+            Assert.That(File.Exists(Path.Combine(moved, "store.lsfs")), Is.True);
+        }
+        finally
+        {
+            // A junction must be deleted non-recursively, before moving back
+            // the opened store. Never recursively delete an external target.
+            WindowsJunctionTestSupport.DeleteJunctionIfPresent(_root);
+            Directory.Move(moved, _root);
+            Directory.Delete(decoy, recursive: true);
+        }
     }
 
     private async ValueTask<FileSystemKeyStore> Open()

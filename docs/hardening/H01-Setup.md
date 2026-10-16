@@ -2,7 +2,18 @@
 
 **English** | [Русский](H01-Setup.ru.md)
 
-**Status (16 October 2026):** verification infrastructure is operational. `Verify` completed successfully on Windows and Ubuntu, including source/documentation checks and both NUnit jobs. The repository remains pre-release and the Phase 27 security sign-off is **not** complete.
+**Status (16 October 2026): H01 CLOSED — infrastructure verification accepted.** `Verify` passed on Windows and Ubuntu, and the monthly/manual `Extended Regression` workflow passed its first manual run on both operating systems. Pull Requests #1–#3 were merged into the protected `master`. This closes the build/CI/repository-hardening scope **only**; the repository remains pre-release and Phase 27 security sign-off is **not** complete.
+
+## Closure evidence and remaining scope
+
+H01 was closed against its infrastructure acceptance criteria on **16 October 2026**:
+
+- `Verify` passed the required `Source & docs`, `Build & NUnit (ubuntu-latest)` and `Build & NUnit (windows-latest)` jobs.
+- Dependency locks, Release builds with warnings as errors, platform-specific test selection and TRX validation are part of the verification baseline.
+- `Protect master` requires PRs and the three successful checks; routine changes were exercised through [PR #1](https://github.com/ivmu5/Laveyana.Security/pull/1), [PR #2](https://github.com/ivmu5/Laveyana.Security/pull/2) and [PR #3](https://github.com/ivmu5/Laveyana.Security/pull/3).
+- The [manual regression run](https://github.com/ivmu5/Laveyana.Security/actions/runs/38908695165) passed on both platforms. Subsequent runs are monthly or manual.
+
+**Not closed by H01:** Phase 27 findings SA-02 (Windows TOCTOU), SA-03 (rollback), SA-04 (nonce lifetime), SA-05 (audit sink liveness) and SA-08 (adversarial platform/security testing). These remain open release gates. Do not use experimental filesystem writes to store production secrets on the strength of this checkpoint.
 
 ## Reproducible local verification
 

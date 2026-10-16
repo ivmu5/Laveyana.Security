@@ -28,7 +28,7 @@ dotnet test Laveyana.Security.sln --no-build --no-restore -c Release
 
 ## GitHub Actions
 
-Workflow `Verify` запускается по Push и Pull Request. Обязательные имена проверок:
+Workflow `Verify` запускается для каждого Pull Request и при Push в `master` (включая Push после слияния). Отдельные Push в рабочие ветки не запускают `Verify`, чтобы избежать дублирования проверок открытых Pull Request. Обязательные имена проверок:
 
 1. `Source & docs`
 2. `Build & NUnit (ubuntu-latest)`

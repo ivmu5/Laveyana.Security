@@ -28,7 +28,7 @@ After changing NuGet dependencies, regenerate locks via [`scripts/Initialize-Loc
 
 ## GitHub Actions
 
-The `Verify` workflow runs on Push and Pull Request. Its required job/check names are:
+The `Verify` workflow runs on every Pull Request and on pushes to `master` (including the post-merge push). It intentionally does not run on independent pushes to topic branches, avoiding duplicated CI for open Pull Requests. Its required job/check names are:
 
 1. `Source & docs`
 2. `Build & NUnit (ubuntu-latest)`

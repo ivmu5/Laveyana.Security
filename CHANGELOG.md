@@ -6,6 +6,7 @@ This changelog records **unreleased development checkpoints**, not production re
 
 ## Unreleased — H01: nightly regression workflow (2026-10-16)
 
+- Removed duplicate `Verify` runs on open Pull Request branches: Pull Requests are checked once, and pushes to `master` are verified after merge. All three required check names remain unchanged.
 - Added a separately scheduled/manually triggered `Nightly` workflow with five sequential full NUnit runs per OS, per-attempt platform-aware TRX verification, locked restore, Release build, 14-day report artifacts and a per-runner timeout. The normal required `Verify` checks remain unchanged.
 - The workflow has not yet executed on GitHub; it becomes available on the default branch only after merge. This is additional regression coverage, **not** security acceptance or closure of Phase 27 findings.
 

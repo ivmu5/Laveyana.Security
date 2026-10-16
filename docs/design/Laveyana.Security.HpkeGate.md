@@ -1,5 +1,7 @@
 # Phase 19 — HPKE security gate (EN)
 
+**English** | [Русский](Laveyana.Security.HpkeGate.ru.md)
+
 **Status: DEFERRED / UNSUPPORTED.** This report prepares a cryptographic design and evidence, but is **not** approval to ship a Seal/Open API. No `Seal`, `Open`, `SealedPayload`, HPKE capability advertisement or custom wire format is published in this phase.
 
 ## 1. Normative basis and candidate suite

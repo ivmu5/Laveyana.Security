@@ -2,58 +2,66 @@
 
 [English](README.md) | **Русский**
 
-Модульная библиотека .NET 10 для управления жизненным циклом ключей, криптографических операций, интеграции с поставщиками секретов и явной композиции провайдеров. **Это предварительная реализация, не одобренная для production.** Исходники проходили статические проверки репозитория, однако успешная сборка .NET 10, запуск NUnit, межпроцессные испытания и платформенный аудит безопасности **не подтверждены** в текущем окружении.
+[![Verify](https://github.com/ivmu5/Laveyana.Security/actions/workflows/verify.yml/badge.svg)](https://github.com/ivmu5/Laveyana.Security/actions/workflows/verify.yml)
 
-> **Текущая точка:** Phase 27 — предварительный security review исходников Phase 26 (2026-10-10). Внесены исправления асинхронного захвата AAD/сообщений и подготовлены регрессионные тесты. **Аудит и production release gate остаются открытыми**: сборка, NUnit и платформенные сценарии не выполнены. См. [отчёт Phase 27](docs/audit/Laveyana.Security.Phase27.SecurityAudit.ru.md).
+`Laveyana.Security` — набор библиотек .NET 10 для криптографических примитивов, версионированного жизненного цикла ключей, типизированных возможностей провайдеров и явно защищённого постоянного хранения ключей. Основная логика и платформенные интеграции разделены по сборкам. Репозиторий находится **до публичного релиза**; файловое хранилище остаётся **экспериментальным и не одобрено для production-секретов**.
 
-**Исправления H01:** [устранение ошибок первой компиляции и правила размещения типов](docs/hardening/H01-CompilationRepair.ru.md). Перед заменой распакованного проекта используйте чистую папку, сохранив NuGet lock-файлы из старой копии.
+**Верификация (16 октября 2026 года):** GitHub Actions workflow `Verify` успешно завершил проверку исходников/документации, Release-сборку и NUnit на **Windows и Ubuntu**. Это подтверждает работоспособность CI, **но не завершение аудита безопасности Phase 27**. В частности, не закрыты вопросы Windows TOCTOU при работе с путями, независимой защиты от rollback, долговременной уникальности nonce и аварийного восстановления при враждебных условиях. См. [отчёт по безопасности](docs/audit/Laveyana.Security.Phase27.SecurityAudit.ru.md).
 
-**Новое:** [Подготовка первого запуска H01](docs/hardening/H01-Setup.ru.md). Сначала создайте и зафиксируйте настоящие NuGet lock-файлы на компьютере с .NET SDK 10.0.4xx.
+## Содержание
 
-## Сборки
+- [Возможности](#возможности)
+- [Архитектура и точки входа](#архитектура-и-точки-входа)
+- [Быстрый старт](#быстрый-старт)
+- [Проверки](#проверки)
+- [Границы безопасности и жизненного цикла](#границы-безопасности-и-жизненного-цикла)
+- [Документация](#документация)
 
-| Проект | Назначение |
+## Возможности
+
+- Локальные RNG, SHA-2, HMAC, HKDF и PBKDF2, программные криптографические операции с явной политикой алгоритмов.
+- Непрозрачные идентификаторы провайдеров и ключей, точные версии, операции через capabilities и переходы жизненного цикла.
+- Контракты управляемого AEAD-шифрования, MAC, подписи/проверки и derivation с явным владением чувствительной памятью.
+- Версионированные форматы хранения, программный key provider, необязательный контракт rollback-protected nonce allocator и явные операции миграции провайдеров.
+- Экспериментальное файловое `IKeyStore`, Windows DPAPI CurrentUser protector, DI, опциональный worker ротации и телеметрия без секретных данных.
+
+**Не реализовано:** публичное HPKE `Seal`/`Open`, шифрование потоков через AEAD, универсальный постоянный исполнитель асимметричных приватных ключей и встроенный постоянный generic secret backend. Наличие соседних интерфейсов и проектных документов не означает поддержки этих возможностей.
+
+## Архитектура и точки входа
+
+| Сборка | Назначение и ключевые точки входа |
 | --- | --- |
-| `Laveyana.Security.Abstractions` | Стабильные идентификаторы, типизированные дескрипторы, неизменяемые результаты, контракты расширения, владение секретной памятью. |
-| `Laveyana.Security` | Примитивы, жизненный цикл ключей, программный провайдер, AEAD, MAC, derivation, маршрутизация, ротация, миграция, диагностика. |
-| `Laveyana.Security.FileSystem` | Экспериментальный защищённый `IKeyStore`; меры защиты Linux/Windows не прошли production-приёмку. |
-| `Laveyana.Security.Windows` | Явно выбираемый Windows DPAPI CurrentUser `IKeyStoreProtector` (платформенные тесты ещё не подтверждены). |
-| `Laveyana.Security.DependencyInjection` | Явная композиция `AddSecurity`/`AddSecurityDefaults` и необязательный worker ротации. |
-| `Laveyana.Security.Tests` | Модульные и контрактные тесты NUnit. |
-| `Laveyana.Security.IntegrationTests` | Интеграционные сценарии NUnit для DI, FileSystem, Windows и worker. |
+| `Laveyana.Security.Abstractions` | [Идентификаторы ключей](src/Laveyana.Security.Abstractions/Identifiers/KeyReference.cs), [типизированные capabilities](src/Laveyana.Security.Abstractions/Capabilities/EncryptionKey.cs), [контракт хранилища](src/Laveyana.Security.Abstractions/Storage/IKeyStore.cs), [контракт protector](src/Laveyana.Security.Abstractions/Protection/IKeyStoreProtector.cs). |
+| `Laveyana.Security` | [LocalCryptography](src/Laveyana.Security/Primitives/LocalCryptography.cs), [SoftwareKeyProviderBackend](src/Laveyana.Security/Software/SoftwareKeyProviderBackend.cs), [ProviderRegistry](src/Laveyana.Security/Providers/ProviderRegistry.cs), lifecycle, migration, observability. |
+| `Laveyana.Security.FileSystem` | [FileSystemKeyStore](src/Laveyana.Security.FileSystem/Storage/FileSystemKeyStore.cs), [опции](src/Laveyana.Security.FileSystem/Storage/FileSystemKeyStoreOptions.cs), проверки Windows ACL и Linux-путей через дескрипторы. **Экспериментально.** |
+| `Laveyana.Security.Windows` | [WindowsDpapiUserProtector](src/Laveyana.Security.Windows/Protection/WindowsDpapiUserProtector.cs), выбирается явно, работает только на Windows. |
+| `Laveyana.Security.DependencyInjection` | [AddSecurity / AddSecurityDefaults](src/Laveyana.Security.DependencyInjection/Composition/SecurityServiceCollectionExtensions.cs), [composition builder](src/Laveyana.Security.DependencyInjection/Composition/SecurityCompositionBuilder.cs), необязательный worker ротации. |
 
-Публичные контракты расширения находятся в Abstractions. Можно создавать компоненты вручную без DI. Автоматического plaintext fallback, выбора protector, создания файлового хранилища или запуска worker нет.
+```text
+Приложение
+  -> Laveyana.Security.DependencyInjection (необязательная явная композиция)
+  -> Laveyana.Security + Laveyana.Security.Abstractions
+                  -> контракты provider / store / protector
+                  -> необязательные FileSystem store и Windows protector
+```
 
-## Статус реализации
+В solution также есть `Laveyana.Security.Tests` (модульные и контрактные тесты) и `Laveyana.Security.IntegrationTests` (платформенные, файловые, DI и worker-сценарии). Публичные контракты не зависят от конкретного пути на диске или Windows-protector.
 
-| Подсистема / этапы | Состояние исходников | Существенное ограничение |
-| --- | --- | --- |
-| Идентификаторы, примитивы, защищённая память, дескрипторы, lifecycle, registry (1–7) | Реализовано | Предварительная проверка capability работает только с метаданными; авторизация обязательна при выполнении операции. |
-| Контракты хранилища, software lifecycle, nonce policy, схемы данных (8–11) | Реализовано | Гарантии атомарности и защиты от rollback зависят от реального хранилища и независимого механизма. |
-| FileSystem и платформенное усиление (12–13) | **Экспериментально** | Требуется явное включение экспериментальной записи; Windows TOCTOU, durability и rollback gates открыты. |
-| Windows DPAPI и миграция protector (14, 14A) | Реализовано в исходниках | Тесты Windows и восстановления не подтверждены; повторная защита не означает ротацию рабочего ключа. |
-| Результаты, AES-256-GCM, HMAC, временные ECDSA/RSA-PSS и ECDH/HKDF (15–18) | Реализовано в исходниках | Нет долговременного управления приватными асимметричными ключами и полноценного межпроцессного отзыва. |
-| HPKE `Seal`/`Open` (19) | **Отложено / не поддерживается** | Эталонные векторы RFC 9180 не подтверждают .NET-реализацию HPKE. Публичного HPKE API нет. |
-| Потоковые SHA-2 и HMAC (20) | Реализовано в исходниках | **Потоковое AEAD отложено / не поддерживается** до отдельного security gate. |
-| Secrets, DI, worker ротации, миграция провайдеров, диагностика (21–25) | Реализовано в исходниках | Авторизация провайдера, долговечная очередь, журнал переключения и обязательный аудит остаются ответственностью приложения/провайдера. |
-| Синхронизация документации (26) | Подготовлена | Не закрывает предыдущие проверки сборки и безопасности. |
-| Полный аудит (27) | **Частично выполнен — не принят** | Проведён статический review и исправлены два дефекта; .NET/NUnit, rollback и platform gates открыты. |
+## Быстрый старт
 
-Другие отсутствующие гарантии: нет стандартного rollback-resistant nonce allocator, встроенного постоянного хранилища произвольных секретов, неявного экспорта non-exportable ключей и гарантированного стирания сторонних копий в памяти или удалённых блоков на диске.
-
-## Пример локальных криптографических примитивов
+Для локальных операций с памятью, которой владеет вызывающий код, подключите `Laveyana.Security` и используйте существующий публичный API:
 
 ```csharp
 using System.Security.Cryptography;
 using Laveyana.Security.Primitives;
 
 byte[] key = LocalCryptography.GenerateRandomBytes(32);
-byte[] message = "message"u8.ToArray();
 try
 {
+    byte[] message = "example"u8.ToArray();
     byte[] tag = LocalCryptography.HmacSha256(key, message);
-    bool matches = LocalCryptography.VerifyHmacSha256(key, message, tag);
-    // Обработайте результат, не записывая ключ в журнал.
+    bool verified = LocalCryptography.VerifyHmacSha256(key, message, tag);
+    // Use verified for application logic; do not log the key.
 }
 finally
 {
@@ -61,40 +69,54 @@ finally
 }
 ```
 
-Это локальный примитив, **не** управляемый сервис ключей и не механизм авторизации. Для использования с реальными секретами необходимо самостоятельно оценить создание и хранение ключей, владение памятью, правила провайдера и модель угроз.
+Это пример локального примитива, **а не** протокол аутентификации или полноценного управления ключами. Для управляемых ключей приложение явно выбирает backend и доверенные `IKeyStore` / `IKeyStoreProtector` и использует контракты провайдера. `AddSecurityDefaults` **не** генерирует ключи, не выбирает незащищённое хранилище, не создаёт файловый store и не запускает worker автоматически.
+
+<details>
+<summary>Композиция провайдеров и ограничения файловых записей</summary>
+
+[`SecurityCompositionBuilder`](src/Laveyana.Security.DependencyInjection/Composition/SecurityCompositionBuilder.cs) поддерживает явную регистрацию провайдеров ключей, провайдеров секретов, protector, store, nonce allocator и observability. Композиция регистрируется однократно; несовместимые регистрации приводят к ошибке, а не к незаметному переопределению. Backend обязан проверять права на выполнение операции, а не только во время metadata preflight.
+
+[`FileSystemKeyStoreOptions`](src/Laveyana.Security.FileSystem/Storage/FileSystemKeyStoreOptions.cs) требует абсолютный путь корневого каталога. `EnableExperimentalWrites` по умолчанию `false`; включение допускается **только для экспериментов вне production**. Даже корректно работающий DPAPI не делает файловое хранилище одобренным для production. Приложение отвечает за доверенные идентификаторы процессов, изоляцию каталога, резервное копирование и независимую защиту от rollback, если она нужна.
+
+</details>
 
 ## Проверки
 
-Установите .NET SDK, указанный в [`global.json`](global.json) (10.0.x), затем выполните:
+Установите SDK, указанный в [`global.json`](global.json) (.NET SDK `10.0.400` с `latestPatch` в линейке 10.0.4xx). NuGet lock-файлы уже фиксируются в Git; CI восстанавливает зависимости в locked mode.
 
 ```sh
 python tools/verify_repository.py
-python tools/verify_repository.py --self-test
+python tools/verify_api_layout.py
 python tools/verify_documentation.py
 python tools/verify_documentation.py --self-test
-dotnet restore Laveyana.Security.sln
+dotnet restore Laveyana.Security.sln --locked-mode
 dotnet build Laveyana.Security.sln -c Release --no-restore -warnaserror
 dotnet test Laveyana.Security.sln -c Release --no-build --no-restore
 ```
 
-GitHub Actions настроен на проверку, сборку и тесты на Windows и Ubuntu **при фактическом запуске CI**. Само наличие workflow не доказывает успешного прохождения. До реальной записи секретов требуются испытания прав доступа, файловой системы, нескольких процессов, аварийного восстановления и возврата старого снимка.
+GitHub Actions запускает `Source & docs`, `Build & NUnit (ubuntu-latest)` и `Build & NUnit (windows-latest)` на Push/Pull Request с TRX-отчётами. Активный ruleset `Protect master` защищает ветку по умолчанию: обязателен Pull Request и все три проверки, запрещены force push и удаление. Текущая основная ветка — `master`. Успешная локальная сборка не заменяет платформенную проверку и security-приёмку. Подробнее: [проверки H01](docs/hardening/H01-Setup.ru.md).
+
+## Границы безопасности и жизненного цикла
+
+- Файловый store **экспериментален**: запись только после opt-in, проверка Windows TOCTOU и аварийной долговечности не закрыта; не используйте его для production-секретов.
+- Аутентификация сохранённых данных сама по себе **не** предотвращает восстановление ранее действительного snapshot. Для rollback-sensitive задач необходимо независимое доверенное состояние.
+- Случайные nonce AES-GCM требуют контролируемого бюджета операций; гарантии при нескольких процессах, перезапусках и восстановлении backup — отдельная архитектурная задача. Нельзя предполагать наличие автоматического долговременного nonce allocator.
+- Идентификатор protector должен быть стабильным. Смена или ротация protector **не** равнозначна ротации ключа. DPAPI CurrentUser привязан к профилю Windows-пользователя, а не обеспечивает переносимое шифрование на всей машине.
+- Владение секретным материалом задаётся явно через lease. Массивы вызывающего кода не очищаются автоматически. Отмена операции после durable commit не гарантирует откат.
+- `SecurityObservability` подключается отдельно и не передаёт секретные входные данные; доставка audit events — best-effort, а не транзакционный журнал.
+- Проекты сейчас ориентированы на `net10.0`, имеют `IsPackable=false` и не публикуются из этого репозитория в NuGet.
 
 ## Документация
 
-| Документ | Назначение |
+| Документ | Основная ответственность |
 | --- | --- |
-| [Техническая спецификация](docs/design/Laveyana.Security.TechnicalSpecification.ru.md) | Контракты API, форматы, инварианты и требования безопасности. |
-| [Архитектура](docs/design/Laveyana.Security.Architecture.ru.md) | Сборки, жизненный цикл, провайдеры, хранилище и границы доверия. |
-| [Roadmap](docs/design/Laveyana.Security.Roadmap.ru.md) | Критерии приёмки по этапам и release gates. |
-| [Журнал решений](docs/design/Laveyana.Security.DecisionLog.ru.md) | Решения D04–D57 с намеренными пропусками номеров; см. примечание в журнале. |
-| [HPKE gate](docs/design/Laveyana.Security.HpkeGate.ru.md) | Причины отложенной реализации HPKE. |
-| [Streaming gate](docs/design/Laveyana.Security.StreamingGate.ru.md) | Границы SHA/HMAC и отложенного AEAD. |
-| [Отчёт Phase 27](docs/audit/Laveyana.Security.Phase27.SecurityAudit.ru.md) | Findings, исправления и обязательные release-gate проверки. |
-| [CHANGELOG](CHANGELOG.ru.md) | История неопубликованных этапов, не сообщение о релизе. |
-| [Мастер-промпт](Laveyana.Security.MasterImplementationPrompt.ru.md) | Общие требования Generation 1 и указания для продолжения разработки. |
+| [Technical Specification](docs/design/Laveyana.Security.TechnicalSpecification.ru.md) | Внешние контракты, инварианты и acceptance criteria. |
+| [Architecture](docs/design/Laveyana.Security.Architecture.ru.md) | Внутренние границы, ownership и компоненты. |
+| [Decision Log](docs/design/Laveyana.Security.DecisionLog.ru.md) | Принятые архитектурные решения (исторические DXX сохраняются). |
+| [Roadmap](docs/design/Laveyana.Security.Roadmap.ru.md) | Этапы работ и незакрытые условия релиза. |
+| [HPKE gate](docs/design/Laveyana.Security.HpkeGate.ru.md) · [Streaming gate](docs/design/Laveyana.Security.StreamingGate.ru.md) | Отложенные протокольные возможности и условия их появления. |
+| [Security review Phase 27](docs/audit/Laveyana.Security.Phase27.SecurityAudit.ru.md) | Результаты статического аудита, последующая проверка H01 и оставшиеся риски. |
+| [Проверки H01](docs/hardening/H01-Setup.ru.md) · [История исправлений компиляции](docs/hardening/H01-CompilationRepair.ru.md) | Воспроизводимый CI и история компиляторных исправлений. |
+| [CHANGELOG](CHANGELOG.ru.md) | Изменения в ходе разработки и история релизов (выпуска пока нет). |
 
-У базовых проектных документов есть англоязычные пары `*.md`, а также [English README](README.md) и [English CHANGELOG](CHANGELOG.md).
-
-## Условия выпуска
-
-Phase 27 обязателен. До заявления о production-готовности требуются сборка и тесты, проверенные свойства FileSystem и protector на Windows/Linux, разрешение рисков rollback/nonce и конкурентных операций и отдельный аудит безопасности. HPKE и потоковое AEAD могут оставаться явно неподдерживаемыми. Лицензии в репозитории нет: её выбор и добавление требуют решения владельца проекта.
+Документация поддерживается равнозначными версиями `*.md` (English) и `*.ru.md` (Russian). Репозиторий распространяется под лицензией [MIT](LICENSE.txt). Лицензии сторонних зависимостей нужно проверить отдельно до распространения; версии находятся в [`Directory.Packages.props`](Directory.Packages.props).

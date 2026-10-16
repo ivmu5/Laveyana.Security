@@ -1,57 +1,63 @@
-# H01 — первый запуск на Windows (пошагово)
+# H01 — сборка, CI и защита ветки
 
-Этот архив основан на Phase 27 Partial Audit. **Сборка и тесты пока не подтверждены; не использовать библиотеку с настоящими секретами.** Изменены только конфигурация разработки, CI и платформенная маркировка тестов. Публикация в NuGet отключена (`IsPackable=false`).
+[English](H01-Setup.md) | **Русский**
 
-## Что уже подготовлено
+**Статус на 16 октября 2026 года:** инфраструктура проверки работает. Workflow `Verify` успешно завершился на Windows и Ubuntu, включая проверки исходников/документации и обе группы NUnit. Репозиторий пока не выпущен; **аудит безопасности Phase 27 не завершён**.
 
-- .NET 10 SDK: `global.json` закреплён за feature band `10.0.400` с `latestPatch` (установленный у владельца `10.0.401` подходит).
-- NUnit + VSTest сохранены.
-- Включена генерация настоящих `packages.lock.json` при `dotnet restore`.
-- Проверка NuGet `--locked-mode` при каждом Push и Pull Request.
-- Проверки Windows и Linux в GitHub Actions, TRX и требование успешного выполнения ключевых платформенных тестов (не просто обнаружения/пропуска).
-- Отдельный ночной workflow: три последовательных запуска обеих тестовых сборок на Windows и Linux. Это повторные регрессионные проверки, **ещё не полноценный долгосрочный stress/fault-injection test suite**.
-- Неявно успешные проверки DPAPI на Linux заменены явным `Assert.Ignore` и категориями NUnit.
+## Воспроизводимая локальная проверка
 
-## Первый запуск — один шаг за раз
+- .NET SDK закреплён в [`global.json`](../../global.json): `10.0.400` и `latestPatch` в feature band 10.0.4xx.
+- Версии пакетов централизованы в [`Directory.Packages.props`](../../Directory.Packages.props); созданные `packages.lock.json` хранятся в Git. Зависимости восстанавливаются в locked mode.
+- Сохранены NUnit 4 + NUnit3TestAdapter + VSTest. Платформенные тесты пропускаются явно только на ОС, где они не применимы.
+- Предупреждения компилятора считаются ошибками. XML-документация обязательна для исходников поставляемых библиотек, но не для методов test fixtures.
 
-1. Распакуйте ZIP в обычную рабочую папку, например `C:\Projects\Laveyana.Security`. Архив **не содержит `.git`**.
-2. Откройте PowerShell/Терминал **в папке, где лежит `Laveyana.Security.sln`**.
-3. Проверьте SDK: `dotnet --version`. Ожидается `10.0.401` или другая `10.0.4xx`.
-4. **До первого Git push** создайте настоящие lock-файлы одной командой:
+Из корня репозитория:
 
-   ```powershell
-   .\scripts\Initialize-LockFiles.ps1
-   ```
+```sh
+dotnet --version
+dotnet restore Laveyana.Security.sln --locked-mode
+python tools/verify_repository.py
+python tools/verify_api_layout.py
+python tools/verify_documentation.py
+python tools/verify_documentation.py --self-test
+dotnet build Laveyana.Security.sln --no-restore -c Release -warnaserror
+dotnet test Laveyana.Security.sln --no-build --no-restore -c Release
+```
 
-   Скрипт запустит `dotnet restore --force-evaluate`, проверит наличие lock-файлов всех проектов с прямыми NuGet-зависимостями и проверит `dotnet restore --locked-mode`. Нужен доступ к NuGet-источникам. Если политика PowerShell запрещает запуск сценария, можно выполнить команды вручную:
+После изменения зависимостей перегенерируйте lock-файлы скриптом [`scripts/Initialize-LockFiles.ps1`](../../scripts/Initialize-LockFiles.ps1) на доверенном компьютере с .NET SDK, проверьте изменения и закоммитьте. Нельзя редактировать lock-файлы вручную ради прохождения CI.
 
-   ```powershell
-   dotnet restore .\Laveyana.Security.sln --force-evaluate
-   dotnet restore .\Laveyana.Security.sln --locked-mode
-   ```
+## GitHub Actions
 
-   **Нельзя создавать или исправлять `packages.lock.json` вручную.** Они не вложены в архив, потому что здесь недоступны .NET SDK и проверенный NuGet restore. CI намеренно не пройдёт без настоящих закоммиченных lock-файлов.
-5. При успешном restore проверьте компиляцию:
+Workflow `Verify` запускается по Push и Pull Request. Обязательные имена проверок:
 
-   ```powershell
-   dotnet build .\Laveyana.Security.sln -c Release --no-restore -warnaserror
-   ```
+1. `Source & docs`
+2. `Build & NUnit (ubuntu-latest)`
+3. `Build & NUnit (windows-latest)`
 
-   Ошибки компиляции возможны и должны быть исправлены до закрытия H01. Зелёный CI пока **не подтверждён**.
-6. Затем запустите тесты:
+Матрица использует Release-сборку и locked restore, сохраняет TRX и проверяет, что нужные платформенные NUnit-тесты действительно выполнялись. Ночные повторные прогоны улучшают регрессионную проверку, но не заменяют adversarial-тестирование по модели угроз или имитацию внезапного отключения питания.
 
-   ```powershell
-   dotnet test .\Laveyana.Security.sln -c Release --no-build --no-restore
-   ```
+Активный GitHub ruleset `Protect master` защищает ветку по умолчанию (`master` на 16 октября 2026 года): обязательны Pull Request, все три успешные проверки и актуальность ветки относительно `master`. Запрещены force push и удаление ветки. Требуемое число одобрений пока равно нулю. Не обходите CI ради ускорения выпуска.
 
-7. Создавайте локальный Git-репозиторий и репозиторий GitHub **после** проверки восстановленных зависимостей; в первый commit включите все созданные `packages.lock.json`, исходники и `.github/workflows`.
-8. После первого Push откройте GitHub → вкладка **Actions**. При нормальной работе появятся jobs `Source & docs`, `Build & NUnit (ubuntu-latest)` и `Build & NUnit (windows-latest)`. Каждый job должен пройти. Архивы TRX доступны в отчётах workflow.
-9. После появления успешных проверок настройте Settings → Rules → Rulesets (или Branches → Branch protection) для `main`: Require a pull request before merging, Require status checks, Require branches to be up to date, Block force pushes, и ограничьте bypass/прямой Push. Эти права нельзя безопасно «прописать в ZIP» — они устанавливаются в настройках конкретного GitHub-репозитория. Обязательные проверки: `Source & docs` и обе `Build & NUnit` (их отображаемые имена уточняйте после первого запуска).
+## Обычный процесс внесения изменений
 
-## Ограничения
+```text
+master (защищена)
+  -> создать рабочую ветку
+  -> изменить файлы, проверить локально, сделать commit
+  -> отправить рабочую ветку
+  -> создать Pull Request в master
+  -> дождаться Windows + Ubuntu + source/docs checks
+  -> выполнить merge при соблюдении требований
+  -> синхронизировать локальную master
+```
 
-- Git и GitHub **не создавались** и публикация на NuGet **не включена**.
-- Статическая корректность workflow не равна успешному выполнению на GitHub-hosted runner.
-- Нельзя утверждать, что H01 закрыт до реальной сборки и NUnit на Windows/Linux.
-- Для старта не нужно создавать API-токены и не нужно публиковать NuGet-пакеты.
-- Вариант с требованием PR и проверок зависит от настроек и возможностей конкретного GitHub-репозитория; после первого Push настроим его вместе.
+Пустая рабочая ветка не даст содержательного Pull Request; нужен реальный, проверяемый commit с документацией или исходниками.
+
+## Границы подтверждённой проверки
+
+- Зелёный CI означает, что тестируемая сборка и тесты проходят на CI runners. Это **не** независимый security audit и не доказательство безопасного production-хранилища.
+- CI не подтверждает защиту от гонок замены Windows-путей, воспроизведения старого аутентичного snapshot, рисков nonce при backup/restore или потерь при внезапном отключении питания.
+- GitHub rulesets находятся в настройках репозитория, а не внутри экспорта исходников. Для нового репозитория защиту ветки и обязательные проверки нужно настроить заново.
+- Автоматическая публикация в NuGet отсутствует; в проектах установлено `IsPackable=false`.
+
+Оставшиеся blockers: [отчёт по безопасности](../audit/Laveyana.Security.Phase27.SecurityAudit.ru.md). История компиляторных изменений, позволивших получить зелёный CI: [H01 Compilation Repair](H01-CompilationRepair.ru.md).

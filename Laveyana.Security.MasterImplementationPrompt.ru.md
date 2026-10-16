@@ -6,15 +6,15 @@
 >
 > **Разделение ответственности:** этот промпт задаёт обязательные правила и порядок работы. Четыре design-документа в `docs/design/` фиксируют утверждённое подробное ТЗ, архитектуру, историю решений и этапы реализации. Они не заменяют правила этого промпта.
 
-## Текущая точка продолжения — Phase 27 (частичный аудит, 2026-10-10)
+## Текущая точка продолжения — H01 CI завершён, Phase 27 security gate открыт (2026-10-16)
 
-- Снимок исходников: Phase 25, семь .NET-проектов; документация и CHANGELOG синхронизированы в Phase 26.
-- Функциональные этапы представлены в коде, но фактические сборка .NET 10, NUnit и платформенная верификация **не подтверждены**. Phase 26 не закрывает их критерии приёмки.
-- Phase 19 HPKE `Seal/Open` и encrypted AEAD streaming из Phase 20 остаются **отложенными и не поддерживаются**.
-- FileSystem остаётся экспериментальным с открытыми Windows/rollback/durability security gates; production-использование недопустимо до проверки.
-- Частичный статический обзор Phase 27 завершён; добавлены регрессионные фиксы для захвата AAD и сообщения подписи. **Исполнение этих тестов, реальная сборка и приёмка не подтверждены.**
-- Дальнейший шаг: продолжить **Phase 27**, в первую очередь выполнить clean build и NUnit .NET 10, затем закрыть Windows FileSystem TOCTOU, rollback/nonces и платформенные security gates; подробности в `docs/audit/Laveyana.Security.Phase27.SecurityAudit.ru.md`. Нельзя считать аудит выполненным только по статическим проверкам.
-- Краткая карта текущих API/ограничений: `README.ru.md`; история изменений: `CHANGELOG.ru.md`; решения D04–D57 с намеренными пропусками: `docs/design/Laveyana.Security.DecisionLog.ru.md`.
+- Исходники семи проектов и документация Generation 1 существуют; используется .NET 10.
+- GitHub Actions `Verify` успешно выполнил source/docs проверку и Release build + NUnit на Windows и Ubuntu; существующие NuGet lock-файлы используются в locked mode.
+- `master` защищён активным GitHub ruleset `Protect master`: Pull Request, три обязательные проверки, запрет force push и удаления ветки. Первый PR-цикл остаётся отдельным операционным подтверждением.
+- Phase 19 HPKE `Seal/Open` и encrypted AEAD streaming из Phase 20 отложены и не поддерживаются.
+- FileSystem остаётся экспериментальным: Windows TOCTOU, независимая rollback authority, durable nonce/cross-restart и crash/power-loss security gates не закрыты.
+- Phase 27 остаётся **PARTIAL / NO-GO** до adversarial-проверок и независимого security sign-off. Успешный CI не означает production-приёмку.
+- Текущие API/ограничения: `README.ru.md`; планы: `docs/design/Laveyana.Security.Roadmap.ru.md`; результаты аудита: `docs/audit/Laveyana.Security.Phase27.SecurityAudit.ru.md`.
 
 ---
 

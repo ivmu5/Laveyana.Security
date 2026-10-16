@@ -7,7 +7,7 @@
 > Implementation must preserve the boundaries and invariants in this document. Reopening a fixed decision requires a new technical reason and a Decision Log entry.
 
 
-> **Implementation checkpoint (2026-10-10; Phase 26):** The seven projects and Phase 25 source APIs exist; .NET 10 build, NUnit, Windows/Linux security validation and mandatory Phase 27 audit are **not confirmed**. The FileSystem store remains experimental. HPKE `Seal/Open` and encrypted AEAD streaming are **unsupported**. This document defines intended boundaries; it is not evidence that every acceptance criterion is met. See [README](../../README.md), [Roadmap](Laveyana.Security.Roadmap.md) and [CHANGELOG](../../CHANGELOG.md).
+> **Implementation and verification checkpoint (2026-10-16; H01):** Seven project sources and public APIs are present. GitHub Actions `Source & docs`, Release builds and NUnit passed on Windows and Ubuntu. The previously missing build/test baseline is resolved, but Phase 27 adversarial security acceptance is **not** complete. FileSystem remains experimental; HPKE `Seal/Open` and encrypted streaming AEAD remain unsupported. Historical “tests not executed” remarks in phase narratives describe those phases, not current CI. See [README](../../README.md), [Roadmap](Laveyana.Security.Roadmap.md) and [CHANGELOG](../../CHANGELOG.md).
 
 ## 1. Architectural model
 

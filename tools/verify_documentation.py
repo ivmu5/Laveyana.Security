@@ -29,10 +29,10 @@ PUBLIC_API_ANCHORS = (
 
 
 def docs() -> list[Path]:
+    """Repository-facing Markdown documents. Internal instruction artifacts are not public docs."""
     return ([ROOT / 'README.md', ROOT / 'README.ru.md',
              ROOT / 'CHANGELOG.md', ROOT / 'CHANGELOG.ru.md'] +
-            [DESIGN / f'Laveyana.Security.{name}{suffix}'
-             for name in DESIGN_NAMES for suffix in ('.md', '.ru.md')])
+            sorted((ROOT / 'docs').rglob('*.md')))
 
 
 def links_in(text: str) -> list[str]:
@@ -47,6 +47,11 @@ def verify() -> list[str]:
         if not p.is_file():
             errors.append(f'Missing document: {p.relative_to(ROOT)}')
             continue
+        # Each human-readable Markdown document has an equally maintained language pair.
+        counterpart = p.with_name(p.name[:-6] + '.md') if p.name.endswith('.ru.md') \
+            else p.with_name(p.stem + '.ru.md')
+        if not counterpart.is_file():
+            errors.append(f'Missing language counterpart for {p.relative_to(ROOT)}')
         content = p.read_text(encoding='utf-8')
         if not content.startswith('# '):
             errors.append(f'Missing heading in {p.relative_to(ROOT)}')
@@ -87,8 +92,8 @@ def verify() -> list[str]:
             errors.append(f'Missing roadmap phase headings in {p.name}: {sorted(expected - phases)}')
 
     status_markers = {
-        'README.md': ('Phase 26', 'Phase 27', 'unsupported', 'Experimental', 'not'),
-        'README.ru.md': ('Phase 26', 'Phase 27', 'не поддерживается', 'Экспериментально', 'не подтверждены'),
+        'README.md': ('Phase 27', 'pre-release', 'experimental', 'Windows', 'Ubuntu', 'MIT'),
+        'README.ru.md': ('Phase 27', 'экспериментальным', 'Windows', 'Ubuntu', 'MIT'),
         'CHANGELOG.md': ('Phase 26', 'Phase 27', 'HPKE', 'AEAD', 'Unreleased'),
         'CHANGELOG.ru.md': ('Phase 26', 'Phase 27', 'HPKE', 'AEAD', 'Не выпущено'),
     }

@@ -6,9 +6,13 @@ This changelog records **unreleased development checkpoints**, not production re
 
 ## Unreleased — H01: compiler diagnostic fixes (2026-10-16)
 
+**H01 verification update (16 October 2026):** Both hosted runners now pass `Verify`: `Source & docs`, `Build & NUnit (ubuntu-latest)`, and `Build & NUnit (windows-latest)`. Added dependency lock files; resolved CI-only Windows ACL token-owner behavior, Linux secure-descriptor stream initialization, and Linux test `umask` assumptions. Installed the active `Protect master` ruleset requiring PRs and the three checks. These milestones close the initial build/CI setup, **not** Phase 27 security acceptance.
+
+The historical entries below describe the evidence available when each change was made; earlier “unverified” statements are superseded by the above CI run, not by a production-security sign-off.
+
 - Fixed `CS0618` (NUnit), `CS9174` (`ReadOnlyMemory<byte>`) and Windows-only platform analyzer `CA1416` warnings.
 - Eliminated test-assembly `CS1591` by disabling XML documentation output **only** for test projects; shipping library API documentation remains mandatory.
-- Retained NuGet lock files and excluded `.vs`, `bin`, `obj` from the archive. Real compilation and NUnit remain unverified.
+- Retained NuGet lock files and excluded `.vs`, `bin`, `obj` from the archive. At this checkpoint, compilation and NUnit were not yet verified (subsequently verified by H01 CI).
 
 ## Unreleased — H01 build corrections (2026-10-12)
 

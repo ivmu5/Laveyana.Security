@@ -4,7 +4,7 @@
 
 ## Scope and decision
 
-**Streaming SHA-256/384/512 and full-length HMAC-SHA-256/384/512 are implemented but uncompiled/unexecuted in .NET in this environment. Segmented / encrypted streaming AEAD is explicitly UNSUPPORTED / DEFERRED.** No new ciphertext format or unsafe chunked AES-GCM protocol was introduced. This decision follows the optional gate for encrypted streaming in the Roadmap, not a claim of a complete Phase 20 acceptance.
+**Streaming SHA-256/384/512 and full-length HMAC-SHA-256/384/512 are implemented and covered by the passing 16 October 2026 Windows/Ubuntu CI test baseline. Segmented / encrypted streaming AEAD is explicitly UNSUPPORTED / DEFERRED.** No new ciphertext format or unsafe chunked AES-GCM protocol was introduced. This decision follows the optional gate for encrypted streaming in the Roadmap, not a claim of a complete Phase 20 acceptance.
 
 ## Implemented non-encrypted streaming boundary
 
@@ -14,7 +14,7 @@
 - Stream is borrowed, not closed or rewound. Read buffers are cleared before returning to `ArrayPool`. HMAC internal/native crypto state is disposed; a full tag is copied into `MacResult` and temporary tags are zeroed. No raw key material crosses an external provider interface.
 - Whole-buffer HMAC/AEAD size limits are separate from streaming HMAC limits. This API is neither segmented AEAD nor a way around AEAD's 16 MiB payload cap.
 
-## Tests prepared (not executed by .NET)
+## NUnit tests (executed in H01 CI)
 
 Hash known-answer comparisons (three SHA sizes), empty and partial reads, 6 MiB synthetic stream with 1 KiB windows, exact/short/overlong lengths, cancellation, I/O failure, forbidden SHA-1; three HMAC algorithm equivalences with one-shot MAC, mismatch, corrupted tag, rotation, retirement and deletion, missing capability, exact registry routing, typed view, simultaneous revision mutation and stream failure. Independent format or ciphertext acceptance vectors are intentionally absent because encrypted streaming was not implemented.
 

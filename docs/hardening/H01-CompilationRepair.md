@@ -1,6 +1,8 @@
 # H01 — first Visual Studio build corrections
 
-Status: **source corrections prepared; compilation and NUnit still unverified**. This is not a production release.
+**English** | [Русский](H01-CompilationRepair.ru.md)
+
+**Current status (16 October 2026):** The corrections described below led to successful Windows/Ubuntu GitHub CI Release builds and NUnit checks. This document preserves the earlier diagnostics and repair history; the Phase 27 production security gate remains **NO-GO**. Historical “not yet verified” notes describe the pre-CI checkpoints.
 
 ## Addressed diagnostics
 

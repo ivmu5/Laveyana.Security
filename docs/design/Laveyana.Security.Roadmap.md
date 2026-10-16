@@ -9,7 +9,7 @@ Each phase explicitly records purpose, changes, dependencies, acceptance criteri
 ---
 
 
-> **Current phase status (2026-10-10):** Phase 26 documentation prepared; prior functional phases are **source checkpoints, not accepted/released phases**. .NET builds/NUnit, platform security testing and the mandatory Phase 27 audit remain open. The authoritative source-capability matrix is in [README](../../README.md).
+> **Current verification status (2026-10-16):** H01 `Verify` passed Release builds and NUnit on both Windows and Ubuntu, plus source/docs checks. Earlier functional phases are not thereby production-accepted: Windows TOCTOU, rollback and nonce lifetime gates remain open. Historical “not yet tested” remarks refer to the phase at the time. See [README](../../README.md) and [security review](../audit/Laveyana.Security.Phase27.SecurityAudit.md).
 
 ## Phase 1 — Repository foundation
 

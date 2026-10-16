@@ -9,7 +9,7 @@
 > Package versioning: `X.YYMM.R`.
 
 
-> **Implementation checkpoint (2026-10-10; Phase 26):** This specification includes normative Generation 1 requirements **and** historical phase-specific implementation notes. Earlier statements such as “not yet implemented” describe the cited phase, not the present source baseline. The current status of each capability is in [README](../../README.md). Source availability is not verified compilation, test execution, security acceptance or a production release. FileSystem is experimental; HPKE and streaming AEAD remain unsupported.
+> **Implementation and verification checkpoint (2026-10-16; H01):** Seven project sources and public APIs are present. GitHub Actions `Source & docs`, Release builds and NUnit passed on Windows and Ubuntu. The previously missing build/test baseline is resolved, but Phase 27 adversarial security acceptance is **not** complete. FileSystem remains experimental; HPKE `Seal/Open` and encrypted streaming AEAD remain unsupported. Historical “tests not executed” remarks in phase narratives describe those phases, not current CI. See [README](../../README.md), [Roadmap](Laveyana.Security.Roadmap.md) and [CHANGELOG](../../CHANGELOG.md).
 
 ## 1. Purpose
 

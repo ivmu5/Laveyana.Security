@@ -1,22 +1,22 @@
-name: Nightly
+name: Extended Regression
 
 # Scheduled runs execute on the default branch only.
 # Manual runs become available once this file is merged into the default branch.
 on:
   schedule:
-    - cron: '17 2 * * *' # Daily at 02:17 UTC (avoids top-of-hour congestion).
+    - cron: '17 2 1 * *' # First day of each month at 02:17 UTC.
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: nightly-${{ github.workflow }}-${{ github.ref }}
+  group: regression-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   repeat-nunit:
-    name: Nightly NUnit (${{ matrix.os }})
+    name: Regression NUnit (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
@@ -61,11 +61,11 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $false
           $anyFailed = $false
           if ($env:GITHUB_STEP_SUMMARY) {
-            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "### Nightly NUnit ($env:TEST_PLATFORM)"
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "### Regression NUnit ($env:TEST_PLATFORM)"
             Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "`n| Attempt | Result |`n| --- | --- |"
           }
           foreach ($attempt in 1..5) {
-            $results = "artifacts/nightly/attempt-$attempt"
+            $results = "artifacts/regression/attempt-$attempt"
             Write-Host "===== Attempt $attempt / 5 ($env:TEST_PLATFORM) ====="
             $failed = $false
 
@@ -103,16 +103,16 @@ jobs:
           }
 
           if ($anyFailed) {
-            Write-Error 'At least one of five nightly test attempts failed.'
+            Write-Error 'At least one of five regression test attempts failed.'
             exit 1
           }
-          Write-Host 'All five nightly test attempts passed.'
+          Write-Host 'All five regression test attempts passed.'
 
       - name: Upload per-attempt TRX reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: nightly-trx-${{ matrix.platform }}
-          path: artifacts/nightly/**/*.trx
+          name: regression-trx-${{ matrix.platform }}
+          path: artifacts/regression/**/*.trx
           if-no-files-found: warn
           retention-days: 14

@@ -4,11 +4,12 @@
 
 This changelog records **unreleased development checkpoints**, not production releases or successful security acceptance. Version configured in `Directory.Build.props`: `1.2610.0-alpha.1`. No public package, compatibility promise or release tag is asserted by this document.
 
-## Unreleased — H01: nightly regression workflow (2026-10-16)
+## Unreleased — H01: extended regression workflow (2026-10-16)
 
 - Removed duplicate `Verify` runs on open Pull Request branches: Pull Requests are checked once, and pushes to `master` are verified after merge. All three required check names remain unchanged.
-- Added a separately scheduled/manually triggered `Nightly` workflow with five sequential full NUnit runs per OS, per-attempt platform-aware TRX verification, locked restore, Release build, 14-day report artifacts and a per-runner timeout. The normal required `Verify` checks remain unchanged.
-- The workflow has not yet executed on GitHub; it becomes available on the default branch only after merge. This is additional regression coverage, **not** security acceptance or closure of Phase 27 findings.
+- Added a separately scheduled/manually triggered extended regression workflow with five sequential full NUnit runs per OS, per-attempt platform-aware TRX verification, locked restore, Release build, 14-day report artifacts and a per-runner timeout. The normal required `Verify` checks remain unchanged.
+- Updated the extended regression schedule from daily to the **first day of each month at 02:17 UTC**, while retaining manual dispatch; the GitHub workflow is displayed as `Extended Regression` (the existing `nightly.yml` filename is retained).
+- The [first manual run](https://github.com/ivmu5/Laveyana.Security/actions/runs/38908695165) on `master` passed on Windows and Ubuntu on 16 October 2026. This is additional regression coverage, **not** security acceptance or closure of Phase 27 findings.
 
 ## Unreleased — H01: compiler diagnostic fixes (2026-10-16)
 

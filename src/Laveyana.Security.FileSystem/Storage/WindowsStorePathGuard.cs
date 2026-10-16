@@ -91,7 +91,9 @@ internal static class WindowsStorePathGuard
             // owner only when it is also the current token's default owner;
             // Administrators already has explicit FullControl in the store ACL.
             bool isCurrentUserOwner = user.Equals(owner);
-            bool isCurrentAdminTokenOwner = admins.Equals(identity.Owner) && admins.Equals(owner);
+            SecurityIdentifier? tokenOwner = identity.Owner;
+            bool isCurrentAdminTokenOwner = tokenOwner is not null &&
+                admins.Equals(tokenOwner) && admins.Equals(owner);
             if (!isCurrentUserOwner && !isCurrentAdminTokenOwner)
             {
                 throw new UnauthorizedAccessException("Store entry has an unexpected owner.");

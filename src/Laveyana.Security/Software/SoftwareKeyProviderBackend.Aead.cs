@@ -1,0 +1,279 @@
+using System.Security.Cryptography;
+using Laveyana.Security.Abstractions.Handles;
+using Laveyana.Security.Abstractions.Identifiers;
+using Laveyana.Security.Abstractions.Models;
+using Laveyana.Security.Abstractions.Payloads;
+using Laveyana.Security.Abstractions.Protection;
+using Laveyana.Security.Abstractions.Sensitive;
+using Laveyana.Security.Abstractions.Storage;
+using Laveyana.Security.Algorithms;
+using Laveyana.Security.Nonce;
+using Laveyana.Security.Diagnostics;
+
+namespace Laveyana.Security.Software;
+
+/// <summary>Whole-buffer authenticated encryption bound to authoritative software-key material.</summary>
+public sealed partial class SoftwareKeyProviderBackend
+{
+    private const int MaxCiphertextBytes = 16 * 1024 * 1024;
+
+    /// <summary>
+    /// Encrypts with the currently Active AES-256-GCM version and stores its exact identity
+    /// in the authenticated result. The application AAD is required again at decryption.
+    /// </summary>
+    /// <remarks>
+    /// The plaintext is copied before any asynchronous suspension and that temporary copy is wiped.
+    /// The returned ciphertext is owned by the caller. No caller-supplied nonce is accepted.
+    /// </remarks>
+    public ValueTask<EncryptedPayload> EncryptAsync(LogicalKeyHandle handle,
+        ReadOnlyMemory<byte> plaintext, ReadOnlyMemory<byte> applicationAad = default,
+        CancellationToken cancellationToken = default) =>
+        WithAadSnapshotAsync(applicationAad, captured => Observe(SecurityOperation.Encrypt,
+            ct => EncryptCoreAsync(handle, plaintext, captured, ct), cancellationToken));
+
+    private async ValueTask<EncryptedPayload> EncryptCoreAsync(LogicalKeyHandle handle,
+        ReadOnlyMemory<byte> plaintext, ReadOnlyMemory<byte> applicationAad, CancellationToken cancellationToken)
+    {
+        Validate(handle);
+        CheckAeadInput(plaintext.Length, applicationAad.Length);
+        cancellationToken.ThrowIfCancellationRequested();
+        byte[] input = plaintext.ToArray();
+        try
+        {
+            KeyStoreEntry entry = await RequireCorrectEntryAsync(handle, cancellationToken).ConfigureAwait(false);
+            SoftwareKeyMetadata metadata = await ReadAsync(entry, cancellationToken).ConfigureAwait(false);
+            if (metadata.Lifecycle.State != LogicalKeyState.Active ||
+                metadata.Lifecycle.ActiveVersion is not KeyVersion version)
+            {
+                throw new CryptographicException("Forward encryption requires an Active logical key.");
+            }
+
+            KeyReference reference = new(ProviderId, handle.KeyId, version);
+            RequireAeadCapability(metadata, version, WellKnownCapabilities.Encrypt, true);
+            using SensitiveMaterialLease key = await ReadKeyMaterialAsync(reference, entry.Revision,
+                cancellationToken).ConfigureAwait(false);
+
+            // A nonce is issued only after the exact material, state and capability are checked.
+            using AeadNonceSession session = AeadNoncePolicyEngine.Create(new AeadNoncePolicyContext(
+                reference, metadata.Algorithm, _store.Capabilities, _nonceAllocator));
+            byte[] nonce = await session.NextNonceAsync(input.Length, cancellationToken).ConfigureAwait(false);
+            byte[] ciphertext = new byte[input.Length];
+            byte[] tag = new byte[16];
+            byte[] associated = EncryptedPayloadAssociatedData.Build(reference, metadata.Algorithm,
+                nonce, ciphertext.Length, applicationAad.Span);
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                key.UseMaterial(material =>
+                {
+                    if (material.Length != 32)
+                    {
+                        throw new CryptographicException("AES-256-GCM requires exactly 32 key bytes.");
+                    }
+
+                    using AesGcm aes = new(material, 16);
+                    aes.Encrypt(nonce, input, ciphertext, tag, associated);
+                });
+                return new EncryptedPayload(reference, metadata.Algorithm, nonce, ciphertext, tag);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(associated);
+                CryptographicOperations.ZeroMemory(ciphertext);
+                CryptographicOperations.ZeroMemory(tag);
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(input);
+        }
+    }
+
+    /// <summary>
+    /// Captures caller-owned AAD before the first asynchronous suspension. A ReadOnlyMemory
+    /// view does not prevent the caller from changing its backing array while I/O is pending.
+    /// The private snapshot is wiped on success, rejection, cancellation and exceptions.
+    /// </summary>
+    private static async ValueTask<T> WithAadSnapshotAsync<T>(ReadOnlyMemory<byte> applicationAad,
+        Func<byte[], ValueTask<T>> operation)
+    {
+        if (applicationAad.Length > 64 * 1024)
+        {
+            throw new ArgumentOutOfRangeException(nameof(applicationAad), "Application AAD limit is 64 KiB.");
+        }
+
+        byte[] captured = applicationAad.ToArray();
+        try
+        {
+            return await operation(captured).ConfigureAwait(false);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(captured);
+        }
+    }
+
+    /// <summary>Encrypts and separates authenticated metadata from the ciphertext bytes.</summary>
+    public async ValueTask<(DetachedEncryptedPayload Metadata, byte[] Ciphertext)> EncryptDetachedAsync(
+        LogicalKeyHandle handle, ReadOnlyMemory<byte> plaintext,
+        ReadOnlyMemory<byte> applicationAad = default, CancellationToken cancellationToken = default)
+    {
+        EncryptedPayload payload = await EncryptAsync(handle, plaintext, applicationAad,
+            cancellationToken).ConfigureAwait(false);
+        DetachedEncryptedPayload detached = payload.Detach(out byte[] ciphertext);
+        return (detached, ciphertext);
+    }
+
+    /// <summary>
+    /// Authenticates and decrypts using the exact historical version embedded in the payload.
+    /// An invalid tag throws; other storage, policy and configuration errors are never concealed.
+    /// </summary>
+    public ValueTask<byte[]> DecryptAsync(EncryptedPayload payload,
+        ReadOnlyMemory<byte> applicationAad = default, CancellationToken cancellationToken = default) =>
+        WithAadSnapshotAsync(applicationAad, captured => Observe(SecurityOperation.Decrypt,
+            ct => DecryptRequiredAsync(payload, captured, ct), cancellationToken));
+
+    /// <summary>Decrypts separately transported ciphertext with authenticated detached metadata.</summary>
+    public ValueTask<byte[]> DecryptDetachedAsync(DetachedEncryptedPayload metadata,
+        ReadOnlyMemory<byte> ciphertext, ReadOnlyMemory<byte> applicationAad = default,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+        return DecryptAsync(metadata.Attach(ciphertext.Span), applicationAad, cancellationToken);
+    }
+
+    /// <summary>
+    /// Returns null only for AEAD tag authentication failure. All other failures propagate.
+    /// Empty plaintext is represented by an empty array, not null.
+    /// </summary>
+    public ValueTask<byte[]?> TryDecryptAsync(EncryptedPayload payload,
+        ReadOnlyMemory<byte> applicationAad = default, CancellationToken cancellationToken = default) =>
+        WithAadSnapshotAsync(applicationAad, captured => Observe(SecurityOperation.TryDecrypt,
+            ct => DecryptCoreAsync(payload, captured, true, ct), cancellationToken));
+
+    /// <summary>Detached counterpart of TryDecryptAsync, with the same failure contract.</summary>
+    public ValueTask<byte[]?> TryDecryptDetachedAsync(DetachedEncryptedPayload metadata,
+        ReadOnlyMemory<byte> ciphertext, ReadOnlyMemory<byte> applicationAad = default,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+        return TryDecryptAsync(metadata.Attach(ciphertext.Span), applicationAad, cancellationToken);
+    }
+
+    private async ValueTask<byte[]> DecryptRequiredAsync(EncryptedPayload payload,
+        ReadOnlyMemory<byte> applicationAad, CancellationToken cancellationToken) =>
+        await DecryptCoreAsync(payload, applicationAad, false, cancellationToken).ConfigureAwait(false)
+        ?? throw new CryptographicException("AES-GCM authentication failed.");
+
+    private async ValueTask<byte[]?> DecryptCoreAsync(EncryptedPayload payload,
+        ReadOnlyMemory<byte> applicationAad, bool suppressTagFailure, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+        if (!payload.Reference.IsDefined || payload.Reference.ProviderId != ProviderId)
+        {
+            throw new ArgumentException("The payload belongs to another provider.", nameof(payload));
+        }
+
+        CheckAeadInput(payload.CiphertextLength, applicationAad.Length);
+        cancellationToken.ThrowIfCancellationRequested();
+        KeyReference reference = payload.Reference;
+        KeyStoreEntry entry = await _store.FindByIdAsync(ProviderId, reference.KeyId,
+            cancellationToken).ConfigureAwait(false) ?? throw new SoftwareKeyConflictException("KeyNotFound");
+        RequireEntryIdentity(entry, reference.KeyId);
+        SoftwareKeyMetadata metadata = await ReadAsync(entry, cancellationToken).ConfigureAwait(false);
+        RequireAeadCapability(metadata, reference.Version, WellKnownCapabilities.Decrypt, false);
+        if (metadata.Algorithm != payload.Algorithm)
+        {
+            throw new CryptographicException("The payload algorithm differs from the stored key profile.");
+        }
+
+        using SensitiveMaterialLease key = await ReadKeyMaterialAsync(reference, entry.Revision,
+            cancellationToken).ConfigureAwait(false);
+        byte[] nonce = payload.ExportNonceCopy();
+        byte[] tag = payload.ExportAuthenticationTagCopy();
+        byte[] ciphertext = payload.ExportCiphertextCopy();
+        byte[] associated = payload.BuildAssociatedData(applicationAad.Span);
+        byte[] plaintext = new byte[ciphertext.Length];
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            key.UseMaterial(material =>
+            {
+                if (material.Length != 32)
+                {
+                    throw new CryptographicException("AES-256-GCM requires exactly 32 key bytes.");
+                }
+
+                using AesGcm aes = new(material, 16);
+                aes.Decrypt(nonce, ciphertext, tag, plaintext, associated);
+            });
+            return plaintext;
+        }
+        catch (AuthenticationTagMismatchException) when (suppressTagFailure)
+        {
+            CryptographicOperations.ZeroMemory(plaintext);
+            return null;
+        }
+        catch
+        {
+            CryptographicOperations.ZeroMemory(plaintext);
+            throw;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(associated);
+            CryptographicOperations.ZeroMemory(ciphertext);
+            CryptographicOperations.ZeroMemory(tag);
+        }
+    }
+
+    private async ValueTask<SensitiveMaterialLease> ReadKeyMaterialAsync(KeyReference reference,
+        KeyStoreRevision revision, CancellationToken cancellationToken)
+    {
+        KeyStoreMaterialReadResult read = await _store.ReadMaterialAsync(reference, revision,
+            cancellationToken).ConfigureAwait(false);
+        if (read.Status == KeyStoreMaterialReadStatus.RevisionMismatch)
+        {
+            throw new SoftwareKeyConflictException("ConcurrentMutation");
+        }
+
+        if (read.Status != KeyStoreMaterialReadStatus.Found || read.ProtectedMaterial is null)
+        {
+            throw new CryptographicException("Required key material is unavailable.");
+        }
+
+        return await _protector.UnprotectAsync(read.ProtectedMaterial, ProtectionPurpose.KeyMaterial,
+            KeyStoreProtectionContext.ForKeyMaterial(reference), cancellationToken).ConfigureAwait(false);
+    }
+
+    private static void RequireAeadCapability(SoftwareKeyMetadata metadata, KeyVersion version,
+        CapabilityId capability, bool forward)
+    {
+        if (metadata.Kind != KeyKind.Symmetric || metadata.Algorithm != WellKnownAlgorithms.Aes256Gcm)
+        {
+            throw new CryptographicException("Only AES-256-GCM managed encryption is supported.");
+        }
+
+        AlgorithmPolicy.EnsureAllowed(metadata.Algorithm, AlgorithmPurpose.AuthenticatedEncryption,
+            forward ? AlgorithmUse.NewOperation : AlgorithmUse.HistoricalVerification);
+        KeyVersionState state = metadata.Lifecycle.Find(version)?.State ?? KeyVersionState.Unspecified;
+        if (!metadata.Capabilities.Contains(capability) || (forward && state != KeyVersionState.Active) ||
+            (!forward && state != KeyVersionState.Active && state != KeyVersionState.Retired))
+        {
+            throw new CryptographicException("The requested operation is forbidden for this key version.");
+        }
+    }
+
+    private static void CheckAeadInput(int dataLength, int aadLength)
+    {
+        if (dataLength is < 0 or > MaxCiphertextBytes)
+        {
+            throw new ArgumentOutOfRangeException(nameof(dataLength), "AEAD whole-buffer limit is 16 MiB.");
+        }
+
+        if (aadLength is < 0 or > 65_536)
+        {
+            throw new ArgumentOutOfRangeException(nameof(aadLength), "AEAD application AAD limit is 64 KiB.");
+        }
+    }
+}

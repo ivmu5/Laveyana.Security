@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsTestProject>true</IsTestProject>
+    <!-- Test fixtures are not the published API: keep XML docs mandatory in src projects only. -->
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="NUnit" />
+    <PackageReference Include="NUnit3TestAdapter">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <ProjectReference Include="../../src/Laveyana.Security.Windows/Laveyana.Security.Windows.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Laveyana.Security.Abstractions/Laveyana.Security.Abstractions.csproj" />
+    <ProjectReference Include="../../src/Laveyana.Security/Laveyana.Security.csproj" />
+    <ProjectReference Include="../../src/Laveyana.Security.FileSystem/Laveyana.Security.FileSystem.csproj" />
+    <ProjectReference Include="../../src/Laveyana.Security.DependencyInjection/Laveyana.Security.DependencyInjection.csproj" />
+  </ItemGroup>
+</Project>

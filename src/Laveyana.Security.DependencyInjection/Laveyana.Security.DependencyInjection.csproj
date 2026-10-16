@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <ProjectReference Include="../../src/Laveyana.Security.Abstractions/Laveyana.Security.Abstractions.csproj" />
+    <ProjectReference Include="../../src/Laveyana.Security/Laveyana.Security.csproj" />
+    <ProjectReference Include="../../src/Laveyana.Security.FileSystem/Laveyana.Security.FileSystem.csproj" />
+  </ItemGroup>
+</Project>

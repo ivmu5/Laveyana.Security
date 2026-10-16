@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../../src/Laveyana.Security.Abstractions/Laveyana.Security.Abstractions.csproj" />
+  </ItemGroup>
+</Project>

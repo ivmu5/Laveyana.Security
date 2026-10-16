@@ -1,0 +1,30 @@
+# IDE and build output
+**/bin/
+**/obj/
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+TestResults/
+**/TestResults/
+**/coverage/
+*.coverage
+*.coveragexml
+
+# Local transient files
+*.tmp
+*.log
+*.bak
+.DS_Store
+Thumbs.db
+__pycache__/
+*.py[cod]
+
+# H01 build outputs; keep packages.lock.json under version control
+artifacts/
+*.nupkg
+*.snupkg
+.nuget/packages/

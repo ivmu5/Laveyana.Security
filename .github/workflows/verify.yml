@@ -1,0 +1,71 @@
+name: Verify
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  source-checks:
+    name: Source & docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Repository conventions
+        run: python tools/verify_repository.py
+      - name: Public API layout, braces and enum docs
+        run: python tools/verify_api_layout.py
+      - name: Repository checker self-test
+        run: python tools/verify_repository.py --self-test
+      - name: Documentation consistency
+        run: python tools/verify_documentation.py
+      - name: Documentation checker self-test
+        run: python tools/verify_documentation.py --self-test
+
+  build-and-test:
+    name: Build & NUnit (${{ matrix.os }})
+    needs: source-checks
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: Linux
+          - os: windows-latest
+            platform: Windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.4xx'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Show SDK
+        run: dotnet --info
+      - name: Restore locked dependency graph
+        run: dotnet restore Laveyana.Security.sln --locked-mode
+      - name: Release build with warnings as errors
+        run: dotnet build Laveyana.Security.sln --no-restore -c Release -warnaserror
+      - name: Unit tests (TRX)
+        run: dotnet test tests/Laveyana.Security.Tests/Laveyana.Security.Tests.csproj --no-build --no-restore -c Release --logger "trx;LogFileName=unit.trx" --results-directory artifacts/test-results/unit
+      - name: Integration tests (TRX)
+        run: dotnet test tests/Laveyana.Security.IntegrationTests/Laveyana.Security.IntegrationTests.csproj --no-build --no-restore -c Release --logger "trx;LogFileName=integration.trx" --results-directory artifacts/test-results/integration
+      - name: Ensure platform tests actually passed
+        run: python tools/check_trx.py --platform ${{ matrix.platform }} --results-dir artifacts/test-results
+      - name: Publish test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trx-${{ matrix.platform }}
+          path: artifacts/test-results/**/*.trx
+          if-no-files-found: warn
+          retention-days: 14

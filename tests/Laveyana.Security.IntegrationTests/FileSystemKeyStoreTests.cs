@@ -820,7 +820,7 @@ public sealed partial class FileSystemKeyStoreTests
             }, router, new ProtectorReference("untrusted", 5)));
     }
 
-    // EXPERIMENTAL / TEST ONLY — adversarial Windows filesystem tests.
+    // EXPERIMENTAL / TEST ONLY - adversarial Windows filesystem tests.
     // These deliberately mutate only disposable, per-test directories under the user's profile.
     [Category("WindowsOnly")]
     [Category("Adversarial")]

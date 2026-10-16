@@ -34,7 +34,11 @@ The `Verify` workflow runs on Push and Pull Request. Its required job/check name
 2. `Build & NUnit (ubuntu-latest)`
 3. `Build & NUnit (windows-latest)`
 
-The build/test matrix uses Release and locked restores, produces TRX reports, and checks that platform-selected NUnit tests actually run. Nightly repeated runs provide additional regression coverage, but are not substitutes for threat-model-driven adversarial tests or power-failure simulation.
+The build/test matrix uses Release and locked restores, produces TRX reports, and checks that platform-selected NUnit tests actually run.
+
+The separate [`Nightly` workflow](../../.github/workflows/nightly.yml) is scheduled daily for **02:17 UTC** and supports manual launch via **Actions → Nightly → Run workflow** once the file reaches the default branch. On both `ubuntu-latest` and `windows-latest`, it performs one locked restore and one Release build, then runs **both complete NUnit test projects five times**, sequentially. Each attempt has distinct unit and integration TRX outputs; `tools/check_trx.py` validates **each attempt separately**, including mandatory platform test passes. Any failed test run or TRX validation fails the corresponding Nightly job, and reports are retained as artifacts for 14 days. Each runner has a 90-minute timeout.
+
+Nightly is **not** a required `Protect master` status check: `Verify` remains the fast Pull Request gate. Scheduled workflows run from `master` only, so the first scheduled or manual run **cannot be confirmed before merge**. Repeated passing tests help discover intermittent regressions, but do not substitute for threat-model-driven adversarial tests, cross-process abuse testing or power-failure simulation.
 
 The active `Protect master` GitHub ruleset targets the default branch (`master` on 16 October 2026): changes require a Pull Request, the three successful checks above, and an up-to-date branch. The ruleset blocks force-pushes and branch deletion. Required review approvals are currently zero. Avoid bypassing checks to expedite a release.
 

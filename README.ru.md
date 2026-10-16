@@ -94,7 +94,7 @@ dotnet build Laveyana.Security.sln -c Release --no-restore -warnaserror
 dotnet test Laveyana.Security.sln -c Release --no-build --no-restore
 ```
 
-GitHub Actions запускает `Source & docs`, `Build & NUnit (ubuntu-latest)` и `Build & NUnit (windows-latest)` на Push/Pull Request с TRX-отчётами. Активный ruleset `Protect master` защищает ветку по умолчанию: обязателен Pull Request и все три проверки, запрещены force push и удаление. Текущая основная ветка — `master`. Успешная локальная сборка не заменяет платформенную проверку и security-приёмку. Подробнее: [проверки H01](docs/hardening/H01-Setup.ru.md).
+GitHub Actions запускает `Source & docs`, `Build & NUnit (ubuntu-latest)` и `Build & NUnit (windows-latest)` на Push/Pull Request с TRX-отчётами. Активный ruleset `Protect master` защищает ветку по умолчанию: обязателен Pull Request и все три проверки, запрещены force push и удаление. Текущая основная ветка — `master`. Отдельный [workflow Nightly](.github/workflows/nightly.yml) предусматривает пять повторов полного NUnit-набора на каждой ОС по расписанию или вручную после слияния с основной веткой; его первый успешный запуск ещё не подтверждён. Успешная локальная сборка не заменяет платформенную проверку и security-приёмку. Подробнее: [проверки H01](docs/hardening/H01-Setup.ru.md).
 
 ## Границы безопасности и жизненного цикла
 

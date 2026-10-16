@@ -83,9 +83,19 @@ internal static class WindowsStorePathGuard
             throw new UnauthorizedAccessException("Store ACL is missing or null.");
         }
 
-        if (isolated && !user.Equals(descriptor.GetOwner(typeof(SecurityIdentifier))))
+        if (isolated)
         {
-            throw new UnauthorizedAccessException("Store entry has an unexpected owner.");
+            IdentityReference? owner = descriptor.GetOwner(typeof(SecurityIdentifier));
+            // Elevated Windows processes can create files whose default owner is
+            // BUILTIN\Administrators instead of the user's own SID. Trust this
+            // owner only when it is also the current token's default owner;
+            // Administrators already has explicit FullControl in the store ACL.
+            bool isCurrentUserOwner = user.Equals(owner);
+            bool isCurrentAdminTokenOwner = admins.Equals(identity.Owner) && admins.Equals(owner);
+            if (!isCurrentUserOwner && !isCurrentAdminTokenOwner)
+            {
+                throw new UnauthorizedAccessException("Store entry has an unexpected owner.");
+            }
         }
 
         foreach (AuthorizationRule rule in descriptor.GetAccessRules(true, true, typeof(SecurityIdentifier)))

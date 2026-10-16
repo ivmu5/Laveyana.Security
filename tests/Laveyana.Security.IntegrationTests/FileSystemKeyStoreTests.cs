@@ -160,8 +160,8 @@ public sealed class FileSystemKeyStoreTests
         FileSystemKeyStore readOnly = await FileSystemKeyStore.OpenAsync(new FileSystemKeyStoreOptions(_root), _protector);
         KeyStoreCreateRequest request = await CreateRequest(KeyId.New(), _name);
         Assert.ThrowsAsync<InvalidOperationException>(async () => await readOnly.TryCreateAsync(request));
-        Assert.ThrowsAsync<CryptographicException>(async () => await FileSystemKeyStore.OpenAsync(
-            new FileSystemKeyStoreOptions(_root), new TestProtector()));
+        Assert.CatchAsync<CryptographicException>((Func<Task>)(async () => await FileSystemKeyStore.OpenAsync(
+            new FileSystemKeyStoreOptions(_root), new TestProtector())));
         Assert.ThrowsAsync<InvalidOperationException>(async () => await FileSystemKeyStore.OpenAsync(
             new FileSystemKeyStoreOptions(_root) { ExpectedStoreInstanceId = Guid.NewGuid() }, _protector));
     }
@@ -638,55 +638,10 @@ public sealed class FileSystemKeyStoreTests
 
     private async ValueTask<FileSystemKeyStore> Open()
     {
-        try
-        {
-            FileSystemKeyStore store = await FileSystemKeyStore.OpenAsync(
-                new FileSystemKeyStoreOptions(_root) { EnableExperimentalWrites = true }, _protector);
-            _opened.Add(store);
-            return store;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            if (OperatingSystem.IsWindows())
-            {
-                LogWindowsOwnerDiagnostics();
-            }
-
-            throw;
-        }
-    }
-
-    // Temporary CI diagnostic. No production ACL policy is changed by this method.
-    [SupportedOSPlatform("windows")]
-    private void LogWindowsOwnerDiagnostics()
-    {
-        try
-        {
-            using WindowsIdentity identity = WindowsIdentity.GetCurrent();
-            TestContext.Progress.WriteLine($"ACL DIAGNOSTIC: UserSid={identity.User?.Value ?? "<null>"}; " +
-                $"TokenOwnerSid={identity.Owner?.Value ?? "<null>"}");
-
-            string lockPath = Path.Combine(_root, ".store.lock");
-            foreach (string path in new[] { _root, lockPath })
-            {
-                if (!Directory.Exists(path) && !File.Exists(path))
-                {
-                    TestContext.Progress.WriteLine($"ACL DIAGNOSTIC: {Path.GetFileName(path)} missing");
-                    continue;
-                }
-
-                FileSystemSecurity acl = Directory.Exists(path)
-                    ? FileSystemAclExtensions.GetAccessControl(new DirectoryInfo(path))
-                    : FileSystemAclExtensions.GetAccessControl(new FileInfo(path));
-                string ownerSid = (acl.GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier)?.Value
-                    ?? "<null>";
-                TestContext.Progress.WriteLine($"ACL DIAGNOSTIC: {Path.GetFileName(path)} OwnerSid={ownerSid}");
-            }
-        }
-        catch (Exception ex)
-        {
-            TestContext.Progress.WriteLine($"ACL DIAGNOSTIC: Unable to inspect owner: {ex.GetType().Name}: {ex.Message}");
-        }
+        FileSystemKeyStore store = await FileSystemKeyStore.OpenAsync(
+            new FileSystemKeyStoreOptions(_root) { EnableExperimentalWrites = true }, _protector);
+        _opened.Add(store);
+        return store;
     }
 
     private async Task<KeyStoreCreateRequest> CreateRequest(KeyId id, KeyName name) => new(

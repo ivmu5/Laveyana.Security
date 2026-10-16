@@ -206,7 +206,9 @@ internal sealed class LinuxSecureDirectory : IDisposable
         SafeFileHandle handle = new((IntPtr)descriptor, ownsHandle: true);
         try
         {
-            return new FileStream(handle, access, 65536, isAsync: true);
+            // openat() gives us a synchronous native descriptor. FileStream
+            // still supports ReadAsync/WriteAsync through its synchronous-handle fallback.
+            return new FileStream(handle, access, 65536, isAsync: false);
         }
         catch
         {

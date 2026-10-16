@@ -6,6 +6,8 @@
 **Reviewed baseline:** `Laveyana.Security_Phase26_2026-10-10.zip`  
 **Result:** **PARTIAL / RELEASE BLOCKED.** The original scope was static review and initial source corrections; it was not a final security acceptance.
 
+**Current disposition, 16 October 2026:** **SA-02 — CLOSED (scoped filesystem hardening finding)**. Historical sections below retain the status at their respective checkpoints; the final disposition at the end of this report supersedes those earlier `OPEN / HOLD` notes. **SA-03 and SA-04 remain OPEN; SA-08 and other release gates remain separately assessed; Phase 27 remains NO-GO.** Filesystem backends remain `EXPERIMENTAL / TEST ONLY`.
+
 ## Scope and method
 
 Reviewed the boundaries of seven projects, AES-GCM/HMAC/ECDH/signature provider code, the nonce engine, protected persistence, Linux and Windows path guards, Windows DPAPI, sensitive memory, audit/telemetry, input/output contracts, existing tests and CI configuration. The reviewers followed execution/exception paths, historical key versions, input bounds, defensive copies and secret-buffer clearing. `tools/verify_repository.py` and `tools/verify_documentation.py` and their self-tests completed. Mutation tests for four serialized formats and suspended-I/O input mutation regressions were added.
@@ -17,7 +19,7 @@ Reviewed the boundaries of seven projects, AES-GCM/HMAC/ECDH/signature provider 
 | ID | Priority | Evidence location | Observation and consequence | Original review status |
 | --- | --- | --- | --- | --- |
 | SA-01 | **BLOCKER** | `global.json`, CI workflow | No executed .NET 10 Release build or unit/integration NUnit evidence was available at the review checkpoint. | Open at review; updated by H01 |
-| SA-02 | **HIGH** | `FileSystemKeyStore.cs` `AtomicWriteAsync`, `ReadBoundedAsync`; `WindowsStorePathGuard.cs` | Windows pre/post-checks paths but uses names for open/move; replacing a pathname between check and I/O can cause TOCTOU. | Open; experimental writes only |
+| SA-02 | **HIGH** | `FileSystemKeyStore.cs` `AtomicWriteAsync`, `ReadBoundedAsync`; `WindowsStorePathGuard.cs` | Windows pre/post-checks paths but uses names for open/move; replacing a pathname between check and I/O can cause TOCTOU. | Open at original review; current status CLOSED (see final disposition) |
 | SA-03 | **HIGH** | `FileSystemKeyStore.cs` capabilities and `LoadAsync` | Authentication cannot detect replay of a previously valid snapshot. Key states, revisions and tombstones may revert without independent monotonic authority. | Open |
 | SA-04 | **HIGH / GATE** | `AeadNoncePolicyEngine.cs`, `RandomBudgets` | A process-local randomized nonce budget cannot guarantee key-wide uniqueness across restarts, restores or independent processes; a deterministic allocator depends on external trusted state. | Open infrastructure requirement |
 | SA-05 | **MEDIUM** | `SecurityObservability.cs`, best-effort sink | Awaiting an optional sink with `CancellationToken.None` may indefinitely delay the return from an operation whose core work already finished. Sink exceptions are suppressed, but an infinite wait is not. | Open |
@@ -61,7 +63,7 @@ Public API shapes and serialized wire formats were intentionally unchanged. Test
 
 ## Release decision
 
-**NO-GO** for production and real secrets. Phase 27 is **not accepted**. After obtaining build/NUnit evidence, the remaining priorities are SA-02/03/04, platform adversarial tests and a repeat full security review. A successful static or automated test suite does not replace those gates.
+**NO-GO** for production and real secrets. Phase 27 is **not accepted**. At the original review checkpoint, remaining priorities included SA-02/03/04 and platform adversarial testing. As of 16 October 2026, SA-02 has received a scoped closure; SA-03/04 and independent release review requirements remain open. A successful static or automated test suite does not replace those gates.
 
 ## H01 verification addendum — 16 October 2026
 
@@ -336,3 +338,31 @@ Tests use private reflection only to access the existing internal Linux director
 **Correction:** the test helper now accepts `Func<object, T?>` and the nullable lock acquisition call explicitly chooses `T = FileStream`. A null result is valid when acquisition is rejected or disposal wins the race. No production code, public APIs or test assertions were changed by this patch. The updated candidate is **not yet compiled or executed on Windows or Linux**; no new pass counts are claimed.
 
 **Gate decision:** SA02-LIN-01 remains **UNVERIFIED on Linux**, SA-02 remains **OPEN / HOLD**, filesystem backend remains **EXPERIMENTAL / TEST ONLY**, and Phase 27 remains **NO-GO** for real secrets. Next: rebuild Windows Release to ensure test compilation, then run the same revision on Linux CI and inspect all Linux-specific tests and the cross-platform read-only tests.
+
+
+## SA-02 final disposition — CLOSED (16 October 2026)
+
+**Project-owner decision:** close **SA-02 (filesystem path substitution / TOCTOU hardening)** as a scoped engineering finding following the reviewed corrections and automated regression runs. This **CLOSED** status supersedes historical `OPEN / HOLD` decisions **only for SA-02**. Earlier checkpoint records remain intentionally unchanged for traceability.
+
+### Remediations covered
+
+- **Windows:** keystore operations are relative to a pinned directory handle; handle-relative rename, ACL/owner/reparse-point verification, and fail-closed lock error handling are implemented. Native handle use retains `SafeHandle` with `DangerousAddRef` / `DangerousRelease`.
+- **Linux / SA02-LIN-01:** pinned root descriptor usage is retained across native operations including `Exists`, child opens, `Move`, `Remove`, and their associated syscalls.
+- **Read-only:** without `EnableExperimentalWrites`, opening does not silently create a missing `.store.lock` or remove pending files. Separate architecture regressions cover this contract.
+- **Coverage:** Windows symlink/junction/reparse checks, concurrent operations, interprocess interference, recovery scenarios, and 15 architecture-regression cases; nine Linux-only descriptor-lifetime regression cases were added.
+
+### Reported execution evidence
+
+| Environment | Suite | Passed | Failed | Skipped | Evidence |
+| --- | --- | ---: | ---: | ---: | --- |
+| Windows .NET 10 Release | Unit + Integration | **384** | **0** | **23** | Local export `DotNet-TestResults_2026-10-16_23-01-10.zip`; nine Linux-only cases skipped |
+| Ubuntu .NET 10 Release / GitHub Actions | Unit | **296** | **0** | **0** | Supplied `dotnet test` output |
+| Ubuntu .NET 10 Release / GitHub Actions | Integration | **71** | **0** | **0 in final summary** | Supplied `Passed!` summary; workflow reported successful |
+
+**Ubuntu evidence caveat:** an earlier excerpt from the same integration job listed 40 `Skipped` cases, which is inconsistent with the terminal summary `Skipped: 0, Total: 71`. The original `integration.trx` is not included here, so exact skipped accounting and the per-case execution status of all nine Linux-only additions **have not been independently reconciled** from the supplied excerpts. Preserve and compare the original TRX against the CI log as a **follow-up evidence-quality task**, not an allegation of a demonstrated vulnerability. SA-02 closure records the project owner's **scoped engineering acceptance**, not a full security certification.
+
+### Limits and remaining gates
+
+- Successful bounded concurrency tests are not an exhaustive proof against every schedule; full power-loss fault injection and independent security review remain distinct release gates.
+- **SA-03 (rollback/replay) and SA-04 (durable nonce uniqueness): OPEN.** SA-08 and other incomplete Phase 27 review gates are not closed by this disposition.
+- **Phase 27: NO-GO** for production and real secrets. **Windows/Linux filesystem backends: `EXPERIMENTAL / TEST ONLY`.** Closing SA-02 does not authorize production deployment or change those restrictions.

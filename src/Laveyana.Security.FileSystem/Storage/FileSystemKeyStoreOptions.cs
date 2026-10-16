@@ -23,6 +23,11 @@ public sealed class FileSystemKeyStoreOptions
     public string RootDirectory { get; }
 
     /// <summary>Enables non-production write experiments only; false by default.</summary>
+    /// <remarks>
+    /// When disabled, opening an existing store does not create its lock file or
+    /// remove pending files. The existing lock must already be present.
+    /// This does not prevent OS-managed access-time metadata updates.
+    /// </remarks>
     public bool EnableExperimentalWrites { get; init; }
 
     /// <summary>Optionally pins the expected store UUID against unexpected bootstrap replacement.</summary>

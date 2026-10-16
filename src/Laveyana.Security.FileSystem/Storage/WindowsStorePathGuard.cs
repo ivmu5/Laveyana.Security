@@ -122,6 +122,10 @@ internal static class WindowsStorePathGuard
             throw new UnauthorizedAccessException("Windows user SID is unavailable.");
         SecurityIdentifier system = new(WellKnownSidType.LocalSystemSid, null);
         SecurityIdentifier admins = new(WellKnownSidType.BuiltinAdministratorsSid, null);
+        // Windows servicing may own system path ancestors. This fixed service SID
+        // does not grant trust to arbitrary user-created service accounts.
+        SecurityIdentifier trustedInstaller = new(
+            "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464");
         RawSecurityDescriptor raw = new(descriptor.GetSecurityDescriptorBinaryForm(), 0);
         if ((raw.ControlFlags & ControlFlags.DiscretionaryAclPresent) == 0 ||
             raw.DiscretionaryAcl is null)
@@ -129,21 +133,27 @@ internal static class WindowsStorePathGuard
             throw new UnauthorizedAccessException("Store ACL is missing or null.");
         }
 
+        IdentityReference? owner = descriptor.GetOwner(typeof(SecurityIdentifier));
+        // Elevated Windows processes can create files with BUILTIN\Administrators
+        // as their default owner. Only accept this for isolated entries when the
+        // current token itself has that default owner.
+        bool isCurrentUserOwner = user.Equals(owner);
+        SecurityIdentifier? tokenOwner = identity.Owner;
+        bool isCurrentAdminTokenOwner = tokenOwner is not null &&
+            admins.Equals(tokenOwner) && admins.Equals(owner);
         if (isolated)
         {
-            IdentityReference? owner = descriptor.GetOwner(typeof(SecurityIdentifier));
-            // Elevated Windows processes can create files whose default owner is
-            // BUILTIN\Administrators instead of the user's own SID. Trust this
-            // owner only when it is also the current token's default owner;
-            // Administrators already has explicit FullControl in the store ACL.
-            bool isCurrentUserOwner = user.Equals(owner);
-            SecurityIdentifier? tokenOwner = identity.Owner;
-            bool isCurrentAdminTokenOwner = tokenOwner is not null &&
-                admins.Equals(tokenOwner) && admins.Equals(owner);
             if (!isCurrentUserOwner && !isCurrentAdminTokenOwner)
             {
                 throw new UnauthorizedAccessException("Store entry has an unexpected owner.");
             }
+        }
+        else if (!isCurrentUserOwner && !admins.Equals(owner) &&
+            !system.Equals(owner) && !trustedInstaller.Equals(owner))
+        {
+            // A directory owner can usually change its DACL without an explicit
+            // allow ACE. Reject ancestors controlled by an untrusted principal.
+            throw new UnauthorizedAccessException("Store ancestor has an untrusted owner.");
         }
 
         foreach (AuthorizationRule rule in descriptor.GetAccessRules(true, true, typeof(SecurityIdentifier)))
@@ -154,7 +164,8 @@ internal static class WindowsStorePathGuard
             }
 
             SecurityIdentifier sid = (SecurityIdentifier)access.IdentityReference;
-            if (sid.Equals(user) || sid.Equals(system) || sid.Equals(admins))
+            if (sid.Equals(user) || sid.Equals(system) || sid.Equals(admins) ||
+                (!isolated && sid.Equals(trustedInstaller)))
             {
                 continue;
             }

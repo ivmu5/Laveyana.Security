@@ -108,10 +108,10 @@ internal sealed class WindowsSecureDirectory : IDisposable
         return AsStream(handle, FileAccess.Write);
     }
 
-    internal FileStream TryAcquireLock(string name)
+    internal FileStream TryAcquireLock(string name, bool createIfMissing)
     {
         SafeFileHandle handle = OpenChild(name, FileReadData | FileWriteData | FileReadAttributes |
-            ReadControl | Synchronize, FileOpenIf, 0)!;
+            ReadControl | Synchronize, createIfMissing ? FileOpenIf : FileOpen, 0)!;
         return AsStream(handle, FileAccess.ReadWrite);
     }
 
@@ -131,8 +131,12 @@ internal sealed class WindowsSecureDirectory : IDisposable
         int nameOffset = lengthOffset + sizeof(int);
         int size = checked(nameOffset + nameBytes.Length);
         nint info = Marshal.AllocHGlobal(size);
+        bool rootReferenceAdded = false;
         try
         {
+            // The native rename buffer stores a raw HANDLE. Keep the SafeHandle
+            // reference alive through NtSetInformationFile, even if Dispose races.
+            _directory.DangerousAddRef(ref rootReferenceAdded);
             // FILE_RENAME_INFO, including explicitly initialized alignment bytes.
             Marshal.Copy(new byte[size], 0, info, size);
             Marshal.WriteByte(info, overwrite ? (byte)1 : (byte)0);
@@ -154,6 +158,11 @@ internal sealed class WindowsSecureDirectory : IDisposable
         }
         finally
         {
+            if (rootReferenceAdded)
+            {
+                _directory.DangerousRelease();
+            }
+
             Marshal.FreeHGlobal(info);
         }
 
@@ -169,8 +178,10 @@ internal sealed class WindowsSecureDirectory : IDisposable
     {
         List<string> names = new();
         nint buffer = Marshal.AllocHGlobal(DirectoryBufferSize);
+        bool rootReferenceAdded = false;
         try
         {
+            _directory.DangerousAddRef(ref rootReferenceAdded);
             int queryClass = FileFullDirectoryRestartInfo;
             for (;;)
             {
@@ -225,6 +236,11 @@ internal sealed class WindowsSecureDirectory : IDisposable
         }
         finally
         {
+            if (rootReferenceAdded)
+            {
+                _directory.DangerousRelease();
+            }
+
             Marshal.FreeHGlobal(buffer);
         }
     }
@@ -261,8 +277,12 @@ internal sealed class WindowsSecureDirectory : IDisposable
         ValidateName(name);
         nint nameBuffer = Marshal.StringToHGlobalUni(name);
         nint unicodeBuffer = nint.Zero;
+        bool rootReferenceAdded = false;
         try
         {
+            // OBJECT_ATTRIBUTES.RootDirectory is a raw HANDLE; the reference
+            // must outlive the entire NtCreateFile call to prevent handle reuse.
+            _directory.DangerousAddRef(ref rootReferenceAdded);
             UnicodeString unicode = new()
             {
                 Length = checked((ushort)(name.Length * sizeof(char))),
@@ -308,6 +328,11 @@ internal sealed class WindowsSecureDirectory : IDisposable
         }
         finally
         {
+            if (rootReferenceAdded)
+            {
+                _directory.DangerousRelease();
+            }
+
             Marshal.FreeHGlobal(unicodeBuffer);
             Marshal.FreeHGlobal(nameBuffer);
         }

@@ -378,7 +378,12 @@ public sealed class FileSystemKeyStore : IKeyStore, IDisposable
             }
 
             await LoadAsync(cancellationToken).ConfigureAwait(false);
-            CleanupAbandonedTemps();
+            // Read-only opens must not delete uncommitted staging files.
+            // Cleanup is a mutation and requires explicit experimental opt-in.
+            if (_options.EnableExperimentalWrites)
+            {
+                CleanupAbandonedTemps();
+            }
         }
     }
 
@@ -481,7 +486,8 @@ public sealed class FileSystemKeyStore : IKeyStore, IDisposable
             cancellationToken.ThrowIfCancellationRequested();
             // Linux checks the existing lock entry before flock; Windows verifies the
             // actual opened lock handle. A second Windows handle cannot inspect a lock
-            // opened with exclusive sharing, so do not pre-open it here.
+            // opened with exclusive sharing, so do not pre-open it here. With writes
+            // disabled both backends open the lock without creating it.
             if (_linuxDirectory is not null && EntryExists(LockName))
             {
                 ValidateStoreFile(LockName);
@@ -491,7 +497,7 @@ public sealed class FileSystemKeyStore : IKeyStore, IDisposable
             {
                 if (_linuxDirectory is not null)
                 {
-                    FileStream? locked = _linuxDirectory.TryAcquireLock(LockName);
+                    FileStream? locked = _linuxDirectory.TryAcquireLock(LockName, _options.EnableExperimentalWrites);
                     if (locked is not null)
                     {
                         return locked;
@@ -506,7 +512,7 @@ public sealed class FileSystemKeyStore : IKeyStore, IDisposable
                     continue;
                 }
 
-                return _windowsDirectory!.TryAcquireLock(LockName);
+                return _windowsDirectory!.TryAcquireLock(LockName, _options.EnableExperimentalWrites);
             }
             catch (IOException error) when (_linuxDirectory is null && IsWindowsLockContention(error))
             {

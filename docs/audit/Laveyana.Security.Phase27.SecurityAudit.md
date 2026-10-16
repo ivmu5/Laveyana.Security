@@ -200,3 +200,139 @@ Expected count *only if all candidates execute without skips or failures*: **383
 **Interpretation:** the prior compile-only errors `CS1010`/`CS1003`/`CS1026` and `CS0246` are resolved for this Windows build. The finite test suite detected no regressions or violations in the tested scenarios. This confirms the test-batch outcome but **does not complete independent security assurance**: unbounded adversarial schedules, same-identity ACL changes, all NT reparse varieties, abrupt termination *inside* a committing library process, sudden loss of power, durable flushing, and Linux-specific adversarial testing are out of scope. In particular, termination of a helper process writing an orphan temporary file does not exercise kill-during-library-commit.
 
 **Gate state remains unchanged:** **SA-02 OPEN for final manual threat-model/code review**; Windows filesystem backend **EXPERIMENTAL / TEST ONLY**, Phase 27 **NO-GO for real secrets**. SA-03 (rollback/replay) and SA-04 (persistent nonce safety) are separate unresolved release gates. The earlier historical candidate/test compile failures remain documented above as history, superseded by this observed successful run. No production code or additional tests are changed by this evidence-only update.
+
+
+## SA-02 — final source-level architecture review (16 October 2026)
+
+**Review basis:** current repository export `Laveyana_2026-10-16_20-23-49.zip`, especially `WindowsSecureDirectory.cs`, `WindowsStorePathGuard.cs`, `FileSystemKeyStore.cs`, existing tests and this report. This is a **source review**, not a new NUnit run, an exploit demonstration, or an independent security audit. Prior verified Windows Release evidence (**369 passed / 0 failed / 14 skipped out of 383**) is unchanged.
+
+**Verified in code:** child file operations use directory-relative NT `NtCreateFile`; opened objects receive handle-based type/reparse/owner/DACL checks; `NtSetInformationFile` names the pinned directory as the rename destination root; temporary file enumeration uses the pinned directory; unsafe lock-file failures are not indiscriminately retried. These design properties mitigate pathname TOCTOU, but do not establish complete adversarial assurance.
+
+### Outstanding findings
+
+| ID | Priority | Location | Finding / required action |
+| --- | --- | --- | --- |
+| SA02-REV-01 | **HIGH / open** | `WindowsSecureDirectory.cs`: `_directory.DangerousGetHandle()` in `Move` and `OpenChild`; `_directory.Dispose()` in `Dispose` | The raw native handle is not reference-counted across the NT operation. Concurrent disposal could close/recycle its numeric value. Protect raw-handle use with `DangerousAddRef`/`DangerousRelease` in `try/finally` or redesign native boundaries to marshal `SafeFileHandle` directly, and define synchronization/lifetime semantics between public disposal and active operations. Add targeted concurrent-disposal stress/fault-injection tests. **No exploit has been demonstrated.** |
+| SA02-REV-02 | **HIGH / open** | `WindowsStorePathGuard.cs`: `ValidateRoot` calls `ValidateAcl(..., isolated: false)` on ancestors; owner is checked only when `isolated` | Ancestor owner trust is not validated. On Windows an object owner can generally update its DACL without an explicit allow ACE, so enumerating only the current ancestor ACEs cannot establish resistance to control by another account. Define allowed owner SIDs for each ancestor (including system-managed roots), validate the handle/path ancestry appropriately, and add negative multi-user ancestor-ACL tests. **No exploit has been demonstrated.** |
+| SA02-OBS-01 | **MEDIUM / clarify contract** | `FileSystemKeyStore.cs`: `InitializeAsync` always performs `CleanupAbandonedTemps()` after successful `LoadAsync`, regardless of `EnableExperimentalWrites` | Opening an existing store without the experimental key-write opt-in can still delete pending files; `.store.lock` is opened with `FileOpenIf`. Specify whether read-only refers only to key-record mutations or to all filesystem changes; test/document the chosen contract. **Not an established TOCTOU bypass.** |
+
+### SA-02 disposition
+
+**SA-02: OPEN (HOLD).** Before closure, remediate REV-01 and REV-02, execute targeted Windows tests for concurrent disposal and an untrusted ancestor owner/ACL, and manually re-review the invariant that all child I/O remains rooted in the pinned trusted directory. Resolve OBS-01 as an API/behavioral contract before release. The prior successful Windows suite remains valid for the scenarios it exercised; it did not cover these additional paths. Same-identity attackers, the full spectrum of NT reparse points, and abrupt crash/power loss remain separate assurance limits. SA-03 (rollback) and SA-04 (durable nonce) remain independent release gates.
+
+**Windows backend: `EXPERIMENTAL / TEST ONLY`; Phase 27: `NO-GO` for production and real secrets.** A green CI run and development-branch push do not signify production approval.
+
+References: Microsoft Learn, `SafeHandle.DangerousGetHandle` / `SafeHandle`, and *Owner of a New Object* (implicit owner DACL rights).
+
+
+## SA-02 - architecture review remediation candidate (16 October 2026)
+
+**Scope:** targeted production-source changes only, using the 20:23:49 repository export plus the preceding architecture-review documents. **No new tests were added and no updated Windows/Linux test run is claimed.** The previously confirmed **369 passed / 0 failed / 14 skipped (383 total)** was performed *before* these changes and cannot be treated as validation of this candidate.
+
+| Review item | Source change | Status |
+| --- | --- | --- |
+| SA02-REV-01 (HIGH) | `WindowsSecureDirectory.cs`: explicit `SafeHandle.DangerousAddRef` / `DangerousRelease` in `try/finally` around the raw root handles used by `NtCreateFile` and `NtSetInformationFile`; a retained reference also spans pinned-handle directory enumeration. A racing `Dispose` cannot close/recycle the native root handle while the operation holds that reference. Operations started after disposal fail rather than being redirected. | **Code candidate; concurrency/dispose tests pending** |
+| SA02-REV-02 (HIGH) | `WindowsStorePathGuard.cs`: all ancestor DACL checks now require an owner in the narrowly defined trusted set: the current user, LocalSystem, BUILTIN\Administrators or the fixed Windows TrustedInstaller service SID. Existing isolated root/file owner checks remain stricter. Only trusted principals may have dangerous ancestor allow ACEs. | **Code candidate; Windows ACL/owner tests pending** |
+| SA02-OBS-01 (MEDIUM) | `FileSystemKeyStore.cs`, `WindowsSecureDirectory.cs`, `LinuxSecureDirectory.cs`, `FileSystemKeyStoreOptions.cs`: read-only opens never clean orphaned temporary files and request an existing lock (`FILE_OPEN` on Windows; no `O_CREAT` on Linux), so a missing lock fails closed instead of being created. No implicit filesystem-entry mutations are performed by read-only initialization. OS-managed access timestamps are not controlled. | **Contract clarified in code; cross-platform tests pending** |
+
+**Boundary conditions:** `SafeHandle` references protect native handle lifetimes but do not make `FileSystemKeyStore.Dispose` an atomic lifecycle barrier across all async methods: concurrent disposal may still fail an operation or leave its commit outcome uncertain. Ancestor metadata is checked by pathname during initialization and may change later; current-owner and privileged-principal attacks remain outside the claimed isolation boundary. Trusting Administrators, SYSTEM and TrustedInstaller assumes these privileged identities are not adversarial. The stricter owner policy may reject stores under nonstandard drive or directory ownership; rejection is intentional pending explicit threat-model review. A pre-existing lock file is required when `EnableExperimentalWrites=false`.
+
+**Next stage, not included here:** Windows stress/fault tests for `Dispose` during `NtCreateFile`/rename/enumeration, untrusted ancestor owners and ACLs, and read-only behavior with/without an existing lock and abandoned staging files; Linux read-only checks. Do not mark the findings closed before platform build, all tests and manual review.
+
+**Current decision:** SA-02 remains **OPEN**. Windows remains **EXPERIMENTAL / TEST ONLY**; Phase 27 stays **NO-GO for production or real secrets**. SA-03 (rollback) and SA-04 (durable nonce) are separate outstanding release gates.
+
+## SA-02 - consolidated architecture-regression test candidate (16 October 2026)
+
+**Basis:** the source-only fix for SA02-REV-01, SA02-REV-02 and SA02-OBS-01. This separate test package adds `FileSystemKeyStoreTests.ArchitectureRegression.cs` without modifying the working filesystem backend or changing pre-existing tests. All added cases are explicitly **EXPERIMENTAL / TEST ONLY**.
+
+**Coverage (15 NUnit cases):**
+
+- **SA02-REV-01 / Windows handle lifetime (4 cases):** 48 bounded races between pinned-handle `OpenRead` and `Dispose`; 24 races between `EnumeratePendingNames` and `Dispose`; 24 races between relative NT rename and `Dispose`, verifying exactly one intact file remains; deterministic denial of native calls after disposal. A successful in-flight call must retain a valid independent file handle. A call losing the disposal race may throw `ObjectDisposedException`. These tests do not enumerate all thread schedules or prove linearizable higher-level store disposal.
+- **SA02-REV-02 / Windows ancestor ownership (7 cases):** synthetic in-memory DACL and owner descriptors (no changes to system folders): reject Everyone/Authenticated Users as ancestor owner even when they have no explicit dangerous ACE; accept LocalSystem, BUILTIN\Administrators, TrustedInstaller for *ancestors only*; reject LocalSystem ownership for the isolated store root; reject an unsafe additional ACE even with a trusted owner. Internal policy is invoked via reflection because the production assembly deliberately exposes no test-only public APIs. Existing end-to-end Windows ACL checks remain in the normal test suite. Synthetic checks do **not** replace multi-user on-disk tests.
+- **SA02-OBS-01 / Windows and Linux non-mutating open (4 cases):** read-only open leaves staged files, snapshot, bootstrap, lock and directory entry list unchanged; missing lock causes fail-closed without creating it; missing root is not created; invalid authenticated snapshot does not trigger staged-file cleanup. The test does not claim absence of OS-level access-time metadata updates.
+
+**Status/evidence:** **candidate only**, not yet compiled or executed on Windows/Linux. The previously confirmed Windows Release baseline **369 passed / 0 failed / 14 skipped (383 total)** applies to the *pre-fix* implementation. If the baseline and all 15 new cases execute successfully without new skips, expected Windows result is **384 passed / 0 failed / 14 skipped (398 total)**; this is **not a measured result**. Obtain fresh Windows TRX, rerun Linux CI, distinguish compile/test regressions from actual safety failures, and perform focused review before updating finding statuses.
+
+**Security decision:** SA-02 remains **OPEN / HOLD**; Windows backend remains **EXPERIMENTAL / TEST ONLY**; Phase 27 remains **NO-GO** for production secrets. Separate SA-03 rollback and SA-04 durable nonce gates remain open.
+
+## SA-02 - architecture regression test execution confirmed (16 October 2026, 22:32 +03:00)
+
+**Evidence:** `DotNet-TestResults_2026-10-16_22-32-26.zip`, with separate Windows Release TRX and console logs for `Laveyana.Security.Tests` and `Laveyana.Security.IntegrationTests`; .NET SDK `10.0.402`. Both `dotnet test` invocations exited with code 0, and both projects built successfully. This execution validates the architecture source-only changes together with the separate 15-case regression test package.
+
+| Windows Release suite | Passed | Failed | Skipped | Total |
+|---|---:|---:|---:|---:|
+| Laveyana.Security.Tests | 296 | 0 | 0 | 296 |
+| Laveyana.Security.IntegrationTests | 88 | 0 | 14 | 102 |
+| **Combined** | **384** | **0** | **14** | **398** |
+
+The 14 skipped tests are platform-dependent non-Windows cases already skipped in the earlier baseline. All 15 added regression cases executed and passed: 4 for pinned Windows handle lifetime under concurrent disposal, 7 for ancestor owner / ACL policy (including parameterized cases), and 4 for non-mutating open semantics. This replaces the prior **candidate only** status of the architecture-regression test package, not the overarching SA-02 disposition.
+
+**Limits:** The TRX establishes outcomes for this specific Windows host and test execution. Bounded race tests do not prove absence of every interleaving; synthetic ACL descriptors do not replace real multi-account authorization testing. No new Linux CI evidence or manual code-review sign-off is included in this run. No crash/power-loss durability claim follows from these tests.
+
+**Decision:** SA-02 remains **OPEN / HOLD** pending focused manual review and cross-platform confirmation. Windows backend remains **EXPERIMENTAL / TEST ONLY** and Phase 27 remains **NO-GO** for production or real secrets. SA-03 (rollback) and SA-04 (durable nonce) remain separate outstanding security gates.
+
+
+## SA-02 - focused source review after architecture regression tests (16 October 2026, repository export 22:37:45)
+
+**Reviewed basis:** `Laveyana_2026-10-16_22-37-45.zip` (current source) and the separately supplied Windows Release TRX from `DotNet-TestResults_2026-10-16_22-32-26.zip`. This is a focused source review, not an independent penetration test, signed human review, new build, or Linux execution. The recorded Windows result remains **384 passed / 0 failed / 14 skipped (398 discovered)**, including all 15 architecture-regression cases. This evidence is specific to Windows.
+
+### Disposition of the three earlier review findings
+
+| ID | Focused source finding | Evidence and residual limits |
+| --- | --- | --- |
+| SA02-REV-01 | **Remediated in Windows source; targeted tests passed.** `WindowsSecureDirectory.Move` and `OpenChild` retain the root `SafeFileHandle` across native calls with `DangerousAddRef` / `DangerousRelease` in `try/finally`; enumeration also retains the handle. No unprotected raw root-handle use was identified in these reviewed operations. | The bounded concurrent-`Dispose` cases passed on Windows. `FileSystemKeyStore.Dispose()` is still not a full async-operation quiescence barrier; a late failure after a successful rename can represent an uncertain commit and requires reconciliation. |
+| SA02-REV-02 | **Remediated in Windows source; synthetic policy tests passed.** `WindowsStorePathGuard.ValidateRoot` checks every ancestor's type/reparse status, DACL and owner. The parent-owner allowlist is the current user, LocalSystem, BUILTIN\Administrators and TrustedInstaller; the isolated store root and opened children have stricter checks. | Seven new Windows cases passed. They verify in-memory ACL/SID policy, **not** real on-disk tests under distinct user accounts or a hostile administrator. Pathname-based ancestor checks are not pinned for the entire lifetime; the threat boundary excludes same-identity and privileged attackers. |
+| SA02-OBS-01 | **Defined and implemented; Windows tests passed.** With `EnableExperimentalWrites=false`, initialization avoids deleting `.pending-*` files, and Windows and Linux lock-open requests do not create a missing `.store.lock`. Missing root/lock fails without deliberate filesystem entry creation. | Four cross-platform test methods passed on **Windows**; their Linux execution is **not verified**. This is a non-mutating application behavior contract, not a guarantee that the OS never updates access-time metadata or that only read filesystem permissions are needed. |
+
+### Additional issue observed during cross-platform inspection
+
+**SA02-LIN-01 - HIGH / OPEN (Linux lifecycle, newly observed):** `LinuxSecureDirectory.cs` exposes the native root file descriptor through `Fd => (int)_directory.DangerousGetHandle()` (around line 196). `OpenChild`/`Exists`/`Move`/`Remove` issue `openat`, `statx`, `renameat(2)`, `unlinkat`, and `fsync` using this raw descriptor without retaining the `SafeFileHandle` for the duration of the syscall. A concurrent `Dispose()` can close and potentially recycle its numeric value; an in-flight relative operation could then address the wrong directory. No exploit or failing test has been demonstrated. Implement an explicit root-handle lifetime lease (`DangerousAddRef` / `DangerousRelease` around each native syscall, or an equivalent safe ownership design) and add Linux concurrent-`Dispose` tests before claiming Linux safety. **This finding does not undo the successful Windows tests, and is not a demonstrated Windows SA-02 regression.**
+
+### Review decision and evidence needed
+
+- **Windows review:** the three previously identified source issues are addressed in the reviewed implementation and have passing targeted Windows tests. This is a bounded assurance finding, not proof against arbitrary TOCTOU/reparse attacks.
+- **Missing evidence:** current Linux CI run against this exact source revision; an actual multi-account Windows ancestor ownership/ACL negative test; a cross-platform resolution for SA02-LIN-01. The uploaded repository export itself does not supply Linux CI execution records.
+- **SA-02 remains OPEN / HOLD** pending the above verification and a final human security gate decision. No code modifications or additional tests were made during this review. **Windows backend stays `EXPERIMENTAL / TEST ONLY`; Phase 27 stays `NO-GO` for real secrets/production.** SA-03 rollback and SA-04 durable nonce remain independent blocking gates.
+
+## SA-02 - Linux root descriptor lifetime hardening candidate (16 October 2026)
+
+**Scope:** source-only correction of **SA02-LIN-01 (HIGH)** in `src/Laveyana.Security.FileSystem/Storage/LinuxSecureDirectory.cs`. No new tests, existing public APIs, storage formats, or Windows backend logic are changed by this package.
+
+**Change:** all uses of the pinned Linux root descriptor in `Exists`, `OpenChild`, `Move`, and `Remove` are now enclosed by `SafeHandle.DangerousAddRef` / `DangerousRelease` in `try/finally`. The raw integer descriptor is only obtained after retaining the handle. `Move` retains one reference through destination inspection, `renameat`/`renameat2`, and the directory `fsync`; `Remove` retains one reference through inspection and `unlinkat`. The child descriptor created by `openat` is independent of the directory descriptor after the call returns.
+
+If `Dispose()` wins before an operation starts, acquiring the reference fails rather than using an already-closed descriptor. If an operation has acquired the reference, concurrent `Dispose()` cannot close and reuse that descriptor until the operation releases it. The initial `Open` path uses a locally owned, unpublished descriptor and is outside this concurrent-dispose scenario.
+
+**Evidence status:** static code review and source/ZIP integrity checks only. **Not compiled or tested on Linux or Windows in this step**. The last confirmed **Windows Release** results, **384 passed / 0 failed / 14 skipped (398 total)**, predate this Linux-only change and must not be presented as validation of the revised Linux implementation. Next gate: Linux Release build, concurrent `Dispose` stress/integration coverage for `Exists`, child open, `Move`, and `Remove`, and Linux CI on the exact revision. As with all bounded concurrency tests, passing results will not prove security against every possible schedule.
+
+**Decision:** **SA02-LIN-01: FIX CANDIDATE, UNVERIFIED**. **SA-02 remains OPEN / HOLD**. FileSystem backend remains **EXPERIMENTAL / TEST ONLY**; Phase 27 remains **NO-GO** for production use and real secrets. SA-03 and SA-04 remain separate open release gates.
+
+## SA-02 - Linux descriptor-lifetime regression tests (16 October 2026; candidate)
+
+**Scope:** a test-only extension for the preceding `SA02-LIN-01` Linux `SafeHandle` lifetime fix. The package does not modify production code, existing tests, public API, or stored formats. All new tests are **EXPERIMENTAL / TEST ONLY** and require a real Linux .NET 10 run.
+
+The new integration-test fixture `LinuxSecureDirectoryLifetimeTests` contributes **9 Linux-only NUnit cases**:
+
+1. `OpenRead` racing `Dispose`: an acquired child stream must remain readable even after root disposal.
+2. `Exists` racing `Dispose`: inspect a real file without stale root-FD errors or wrong outcomes.
+3. `CreateTemporary` racing `Dispose`: successful child streams must remain writable; a pre-acquisition refusal must not create a file.
+4. `TryAcquireLock` racing `Dispose`: a returned independent `flock` must remain exclusive, then be reacquirable after disposal.
+5. `Move(..., overwrite: false)` racing `Dispose`: exactly one full copy survives; no data loss or duplication.
+6. `Move(..., overwrite: true)` racing `Dispose`: destination holds the old complete payload on refusal or the new complete payload on completion.
+7. `Remove` racing `Dispose`: target deletion or safe refusal; an unrelated sentinel survives unchanged.
+8. Calls made after disposal: all six native entry points reject with `ObjectDisposedException` and do not change files.
+9. Pinned-root path replacement: a racing temporary-file create cannot be redirected to an unrelated replacement directory.
+
+Tests use private reflection only to access the existing internal Linux directory abstraction; no production test hook is introduced. All test files and any replacement paths are located under isolated owner-mode `0700` temporary directories. Races permit completed operations and `ObjectDisposedException` before handle acquisition; unexpected native failures, content changes, and unintended path redirects fail the tests. Timed stress is **not** exhaustive fault injection or a proof of the absence of all interleavings.
+
+**Execution status:** only source/packaging checks have been performed for this new fixture. **No updated Linux or Windows build/TRX is claimed**. The last measured **384 passed / 0 failed / 14 skipped** was Windows Release before this 9-case package and before the Linux descriptor change. On Windows these nine new tests are expected to be explicitly skipped, not silently counted as evidence. On Linux they must run and pass; additionally verify the pre-existing Linux platform tests and the four cross-platform read-only architecture regression tests. Capture a Linux Release `.trx` and CI logs from the exact source revision, then separately re-review the lifetime fix.
+
+**Decision:** `SA02-LIN-01` remains **fix candidate, awaiting Linux evidence**; `SA-02` remains **OPEN / HOLD**. The filesystem backends remain **EXPERIMENTAL / TEST ONLY**, and Phase 27 remains **NO-GO** for production or real secrets. SA-03 rollback and SA-04 durable nonce remain separate open gates.
+
+
+## SA-02 - Linux regression test compile correction (16 October 2026, Windows export 22:57:28)
+
+**Evidence:** `DotNet-TestResults_2026-10-16_22-57-28.zip` contains successful .NET 10 Release builds of the production projects and **296 passed / 0 failed** unit tests. The integration test project **did not compile**, so none of the new Linux descriptor-lifetime scenarios executed. `FileSystemKeyStoreTests.LinuxDescriptorLifetime.cs`, line 138, reported `CS8634` and `CS8621`: the nullable `FileStream?` returned by `TryAcquireLock` conflicted with the test helper's non-null `Func<object, T>` / `where T : class` contract.
+
+**Correction:** the test helper now accepts `Func<object, T?>` and the nullable lock acquisition call explicitly chooses `T = FileStream`. A null result is valid when acquisition is rejected or disposal wins the race. No production code, public APIs or test assertions were changed by this patch. The updated candidate is **not yet compiled or executed on Windows or Linux**; no new pass counts are claimed.
+
+**Gate decision:** SA02-LIN-01 remains **UNVERIFIED on Linux**, SA-02 remains **OPEN / HOLD**, filesystem backend remains **EXPERIMENTAL / TEST ONLY**, and Phase 27 remains **NO-GO** for real secrets. Next: rebuild Windows Release to ensure test compilation, then run the same revision on Linux CI and inspect all Linux-specific tests and the cross-platform read-only tests.

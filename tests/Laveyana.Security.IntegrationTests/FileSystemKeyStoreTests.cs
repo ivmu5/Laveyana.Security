@@ -357,9 +357,17 @@ public sealed class FileSystemKeyStoreTests
         string parent = Path.Combine(Path.GetTempPath(), $"laveyana-parent-{Guid.NewGuid():N}");
         string child = Path.Combine(parent, "store");
         Directory.CreateDirectory(parent, UnixFileMode.UserRead | UnixFileMode.UserWrite |
-            UnixFileMode.UserExecute | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute);
+            UnixFileMode.UserExecute);
         try
         {
+            // mkdir creation permissions are filtered by umask. Apply the insecure
+            // permissions explicitly so the test does not depend on the runner umask.
+            UnixFileMode insecureMode = UnixFileMode.UserRead | UnixFileMode.UserWrite |
+                UnixFileMode.UserExecute | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute;
+            File.SetUnixFileMode(parent, insecureMode);
+            Assert.That(File.GetUnixFileMode(parent) & UnixFileMode.GroupWrite,
+                Is.EqualTo(UnixFileMode.GroupWrite), "Test ancestor must be group-writable.");
+
             Assert.ThrowsAsync<UnauthorizedAccessException>(async () => await FileSystemKeyStore.OpenAsync(
                 new FileSystemKeyStoreOptions(child) { EnableExperimentalWrites = true }, _protector));
         }

@@ -4,6 +4,11 @@
 
 This changelog records **unreleased development checkpoints**, not production releases or successful security acceptance. Version configured in `Directory.Build.props`: `1.2610.0-alpha.1`. No public package, compatibility promise or release tag is asserted by this document.
 
+## Unreleased — H01 infrastructure closeout (2026-10-16)
+
+- **H01 closed (build, CI and repository hardening only):** successful required checks, protected `master`, three merged Pull Requests and a passing manual extended regression on Windows/Ubuntu. See the [H01 closure record](docs/hardening/H01-Setup.md).
+- **Phase 27 remains open / production NO-GO:** SA-02, SA-03, SA-04, SA-05 and SA-08 require targeted mitigation, tests and security review. This documentation-only closeout does not alter cryptographic behavior.
+
 ## Unreleased — H01: extended regression workflow (2026-10-16)
 
 - Removed duplicate `Verify` runs on open Pull Request branches: Pull Requests are checked once, and pushes to `master` are verified after merge. All three required check names remain unchanged.

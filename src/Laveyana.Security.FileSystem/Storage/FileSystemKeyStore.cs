@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Security.Cryptography;
 using System.Text;
 using Laveyana.Security.Abstractions.Identifiers;
@@ -11,9 +12,10 @@ namespace Laveyana.Security.FileSystem.Storage;
 
 /// <summary>A protected, single-snapshot, cooperatively locked experimental filesystem store.</summary>
 /// <remarks>
-/// This Phase 13 implementation still requires platform CI and adversarial validation before
-/// production use, especially on Windows where path-based I/O has residual races. The caller must explicitly enable
-/// experimental writes. Only already-protected material is accepted. Snapshot routing
+/// EXPERIMENTAL / TEST ONLY: not approved to protect production secrets.
+/// The Windows handle-relative backend is an unverified SA-02 remediation candidate.
+/// Platform builds, adversarial races, durability and security review are still required.
+/// The caller must explicitly enable experimental writes. Only already-protected material is accepted. Snapshot routing
 /// identifiers and names are not confidential; an authenticated manifest prevents
 /// undetected mutation of the whole snapshot but NOT replay of an older valid snapshot.
 /// No rollback-protected nonce allocation or forensic secure erase is claimed.
@@ -30,6 +32,7 @@ public sealed class FileSystemKeyStore : IKeyStore, IDisposable
     private readonly IKeyStoreProtector _protector;
     private Guid _instanceId;
     private LinuxSecureDirectory? _linuxDirectory;
+    private WindowsSecureDirectory? _windowsDirectory;
     private readonly ProtectorReference? _migrationLegacyReference;
     private ProtectorReference _lastSnapshotReference;
     private bool _migrationRootCompleted;
@@ -340,7 +343,7 @@ public sealed class FileSystemKeyStore : IKeyStore, IDisposable
         }
         else if (OperatingSystem.IsWindows())
         {
-            WindowsStorePathGuard.ValidateRoot(_options.RootDirectory);
+            _windowsDirectory = WindowsSecureDirectory.Open(_options.RootDirectory);
         }
         else
         {
@@ -375,7 +378,12 @@ public sealed class FileSystemKeyStore : IKeyStore, IDisposable
             }
 
             await LoadAsync(cancellationToken).ConfigureAwait(false);
-            CleanupAbandonedTemps();
+            // Read-only opens must not delete uncommitted staging files.
+            // Cleanup is a mutation and requires explicit experimental opt-in.
+            if (_options.EnableExperimentalWrites)
+            {
+                CleanupAbandonedTemps();
+            }
         }
     }
 
@@ -472,12 +480,15 @@ public sealed class FileSystemKeyStore : IKeyStore, IDisposable
 
     private async ValueTask<FileStream> AcquireLockAsync(CancellationToken cancellationToken)
     {
-        string path = StorePath(LockName);
         DateTime deadline = DateTime.UtcNow + _options.LockTimeout;
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (EntryExists(LockName))
+            // Linux checks the existing lock entry before flock; Windows verifies the
+            // actual opened lock handle. A second Windows handle cannot inspect a lock
+            // opened with exclusive sharing, so do not pre-open it here. With writes
+            // disabled both backends open the lock without creating it.
+            if (_linuxDirectory is not null && EntryExists(LockName))
             {
                 ValidateStoreFile(LockName);
             }
@@ -486,7 +497,7 @@ public sealed class FileSystemKeyStore : IKeyStore, IDisposable
             {
                 if (_linuxDirectory is not null)
                 {
-                    FileStream? locked = _linuxDirectory.TryAcquireLock(LockName);
+                    FileStream? locked = _linuxDirectory.TryAcquireLock(LockName, _options.EnableExperimentalWrites);
                     if (locked is not null)
                     {
                         return locked;
@@ -501,28 +512,32 @@ public sealed class FileSystemKeyStore : IKeyStore, IDisposable
                     continue;
                 }
 
-                FileStream result = new(path, FileMode.OpenOrCreate, FileAccess.ReadWrite,
-                    FileShare.None, 1, FileOptions.WriteThrough);
-                try
-                {
-                    ValidateStoreFile(LockName);
-                    return result;
-                }
-                catch
-                {
-                    result.Dispose();
-                    throw;
-                }
+                return _windowsDirectory!.TryAcquireLock(LockName, _options.EnableExperimentalWrites);
             }
-            catch (IOException) when (_linuxDirectory is null && DateTime.UtcNow < deadline)
+            catch (IOException error) when (_linuxDirectory is null && IsWindowsLockContention(error))
             {
+                // EXPERIMENTAL / TEST ONLY: retry only genuine OS-level lock contention.
+                // An unsafe reparse point, invalid ACL or other I/O failure must fail
+                // immediately instead of being hidden behind a misleading timeout.
+                if (DateTime.UtcNow >= deadline)
+                {
+                    throw new TimeoutException("Unable to acquire the store's cooperative interprocess lock.", error);
+                }
+
                 await Task.Delay(25, cancellationToken).ConfigureAwait(false);
             }
-            catch (IOException error) when (_linuxDirectory is null)
-            {
-                throw new TimeoutException("Unable to acquire the store's cooperative interprocess lock.", error);
-            }
         }
+    }
+
+    private static bool IsWindowsLockContention(IOException error)
+    {
+        // NtCreateFile maps STATUS_SHARING_VIOLATION / STATUS_FILE_LOCK_CONFLICT
+        // to Win32 32/33 through an inner Win32Exception. FileStream may instead
+        // propagate the corresponding HRESULT directly on its IOException.
+        const int sharingViolation = unchecked((int)0x80070020);
+        const int lockViolation = unchecked((int)0x80070021);
+        return error.HResult is sharingViolation or lockViolation ||
+            error.InnerException is Win32Exception { NativeErrorCode: 32 or 33 };
     }
 
     private async ValueTask AtomicWriteAsync(string destination, byte[] data, bool overwrite,
@@ -530,18 +545,12 @@ public sealed class FileSystemKeyStore : IKeyStore, IDisposable
     {
         string destinationName = Path.GetFileName(destination);
         string temporaryName = $"{PendingPrefix}{Guid.NewGuid():N}{PendingSuffix}";
-        string temp = StorePath(temporaryName);
         try
         {
             using (FileStream stream = _linuxDirectory is not null
                 ? _linuxDirectory.CreateTemporary(temporaryName)
-                : new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None,
-                    65536, FileOptions.WriteThrough | FileOptions.Asynchronous))
+                : _windowsDirectory!.CreateTemporary(temporaryName))
             {
-                if (OperatingSystem.IsWindows())
-                {
-                    WindowsStorePathGuard.ValidateFile(temp);
-                }
 
                 await stream.WriteAsync(data, cancellationToken).ConfigureAwait(false);
                 stream.Flush(true);
@@ -571,9 +580,7 @@ public sealed class FileSystemKeyStore : IKeyStore, IDisposable
                     throw new PlatformNotSupportedException("Unsupported filesystem backend.");
                 }
 
-                WindowsStorePathGuard.ValidateRoot(_options.RootDirectory);
-                File.Move(temp, destination, overwrite);
-                WindowsStorePathGuard.ValidateFile(destination);
+                _windowsDirectory!.Move(temporaryName, destinationName, overwrite);
             }
         }
         finally
@@ -582,35 +589,40 @@ public sealed class FileSystemKeyStore : IKeyStore, IDisposable
             {
                 _linuxDirectory.Remove(temporaryName);
             }
-            else if (File.Exists(temp) && OperatingSystem.IsWindows())
+            else
             {
-                WindowsStorePathGuard.ValidateFile(temp);
-                File.Delete(temp);
+                _windowsDirectory?.Remove(temporaryName);
             }
         }
     }
 
     private void CleanupAbandonedTemps()
     {
+        if (_windowsDirectory is not null)
+        {
+            foreach (string name in _windowsDirectory.EnumeratePendingNames())
+            {
+                ValidateStoreFile(name);
+                _windowsDirectory.Remove(name);
+            }
+
+            return;
+        }
+
+        // Linux cleanup is unchanged; individual deletions remain descriptor-relative.
         foreach (string path in Directory.EnumerateFiles(_options.RootDirectory,
             $"{PendingPrefix}*{PendingSuffix}", SearchOption.TopDirectoryOnly))
         {
             string name = Path.GetFileName(path);
             ValidateStoreFile(name);
-            if (_linuxDirectory is not null)
-            {
-                _linuxDirectory.Remove(name);
-            }
-            else
-            {
-                File.Delete(path);
-            }
+            _linuxDirectory!.Remove(name);
         }
     }
 
     private string StorePath(string fileName) => Path.Combine(_options.RootDirectory, fileName);
 
-    private bool EntryExists(string fileName) => _linuxDirectory?.Exists(fileName) ?? File.Exists(StorePath(fileName));
+    private bool EntryExists(string fileName) => _linuxDirectory?.Exists(fileName)
+        ?? _windowsDirectory?.Exists(fileName) ?? false;
 
     private void ValidateStoreFile(string fileName)
     {
@@ -626,8 +638,10 @@ public sealed class FileSystemKeyStore : IKeyStore, IDisposable
                 throw new PlatformNotSupportedException("Unsupported filesystem backend.");
             }
 
-            WindowsStorePathGuard.ValidateRoot(_options.RootDirectory);
-            WindowsStorePathGuard.ValidateFile(StorePath(fileName));
+            if (!_windowsDirectory!.Exists(fileName))
+            {
+                throw new FileNotFoundException("Required store file is missing.", StorePath(fileName));
+            }
         }
     }
 
@@ -646,17 +660,7 @@ public sealed class FileSystemKeyStore : IKeyStore, IDisposable
     {
         using FileStream stream = _linuxDirectory is not null
             ? _linuxDirectory.OpenRead(fileName)
-            : new FileStream(StorePath(fileName), FileMode.Open, FileAccess.Read, FileShare.Read,
-                65536, FileOptions.SequentialScan | FileOptions.Asynchronous);
-        if (_linuxDirectory is null)
-        {
-            if (!OperatingSystem.IsWindows())
-            {
-                throw new PlatformNotSupportedException("Unsupported filesystem backend.");
-            }
-
-            WindowsStorePathGuard.ValidateFile(StorePath(fileName));
-        }
+            : _windowsDirectory!.OpenRead(fileName);
 
         if (stream.Length is <= 0 || stream.Length > maximum)
         {
@@ -668,6 +672,10 @@ public sealed class FileSystemKeyStore : IKeyStore, IDisposable
         return bytes;
     }
 
-    /// <summary>Releases the pinned Linux directory handle (not a secure erase operation).</summary>
-    public void Dispose() => _linuxDirectory?.Dispose();
+    /// <summary>Releases pinned platform directory handles (not a secure erase operation).</summary>
+    public void Dispose()
+    {
+        _linuxDirectory?.Dispose();
+        _windowsDirectory?.Dispose();
+    }
 }

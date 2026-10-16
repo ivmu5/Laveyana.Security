@@ -5,7 +5,11 @@ using Microsoft.Win32.SafeHandles;
 namespace Laveyana.Security.FileSystem.Storage;
 
 /// <summary>Linux-specific directory-relative filesystem operations with no-follow descriptors.</summary>
-/// <remarks>All mutations stay bound to the opened directory even if its pathname is renamed.</remarks>
+/// <remarks>
+/// EXPERIMENTAL / TEST ONLY: the Linux backend is not production-approved.
+/// All mutations stay bound to the opened directory even if its pathname is renamed.
+/// Root descriptor references are retained across native calls to avoid close/reuse races.
+/// </remarks>
 internal sealed class LinuxSecureDirectory : IDisposable
 {
     private const int AtFdcwd = -100;
@@ -76,7 +80,25 @@ internal sealed class LinuxSecureDirectory : IDisposable
     internal bool Exists(string name)
     {
         ValidateName(name);
-        if (statx(Fd, name, AtSymlinkNoFollow, StatxBasicStats, out LinuxStatx state) != 0)
+        bool rootReferenceAdded = false;
+        try
+        {
+            int rootFd = AcquireDirectoryDescriptor(ref rootReferenceAdded);
+            return ExistsCore(rootFd, name);
+        }
+        finally
+        {
+            if (rootReferenceAdded)
+            {
+                _directory.DangerousRelease();
+            }
+        }
+    }
+
+    // Caller must hold a SafeHandle reference for the entire native operation.
+    private static bool ExistsCore(int rootFd, string name)
+    {
+        if (statx(rootFd, name, AtSymlinkNoFollow, StatxBasicStats, out LinuxStatx state) != 0)
         {
             if (Marshal.GetLastPInvokeError() == ENoEnt)
             {
@@ -124,9 +146,15 @@ internal sealed class LinuxSecureDirectory : IDisposable
         return AsStream(descriptor, FileAccess.Write);
     }
 
-    internal FileStream? TryAcquireLock(string name)
+    internal FileStream? TryAcquireLock(string name, bool createIfMissing)
     {
-        int descriptor = OpenChild(name, OReadWrite | OCreate | ONoFollow | OCloseOnExec, OwnerReadWrite);
+        int flags = OReadWrite | ONoFollow | OCloseOnExec;
+        if (createIfMissing)
+        {
+            flags |= OCreate;
+        }
+
+        int descriptor = OpenChild(name, flags, OwnerReadWrite);
         try
         {
             VerifyDescriptor(descriptor, false);
@@ -156,49 +184,95 @@ internal sealed class LinuxSecureDirectory : IDisposable
     {
         ValidateName(temporaryName);
         ValidateName(destinationName);
-        if (Exists(destinationName) && !overwrite)
+        bool rootReferenceAdded = false;
+        try
         {
-            throw new IOException("Store destination already exists.");
-        }
+            // The same pinned directory descriptor covers the destination check,
+            // rename and durability barrier, even if Dispose races with Move.
+            int rootFd = AcquireDirectoryDescriptor(ref rootReferenceAdded);
+            if (ExistsCore(rootFd, destinationName) && !overwrite)
+            {
+                throw new IOException("Store destination already exists.");
+            }
 
-        int result = overwrite
-            ? renameat(Fd, temporaryName, Fd, destinationName)
-            : renameat2(Fd, temporaryName, Fd, destinationName, 1);
-        if (result != 0)
-        {
-            throw NativeError("Replacing store snapshot");
-        }
+            int result = overwrite
+                ? renameat(rootFd, temporaryName, rootFd, destinationName)
+                : renameat2(rootFd, temporaryName, rootFd, destinationName, 1);
+            if (result != 0)
+            {
+                throw NativeError("Replacing store snapshot");
+            }
 
-        // Post-rename failure is an uncertain commit; callers must reconcile.
-        if (fsync(Fd) != 0)
+            // Post-rename failure is an uncertain commit; callers must reconcile.
+            if (fsync(rootFd) != 0)
+            {
+                throw NativeError("Synchronizing store directory");
+            }
+        }
+        finally
         {
-            throw NativeError("Synchronizing store directory");
+            if (rootReferenceAdded)
+            {
+                _directory.DangerousRelease();
+            }
         }
     }
 
     internal void Remove(string name)
     {
         ValidateName(name);
-        if (Exists(name) && unlinkat(Fd, name, 0) != 0)
+        bool rootReferenceAdded = false;
+        try
         {
-            throw NativeError("Removing temporary store file");
+            // Keep the same directory pinned across inspection and unlinkat.
+            int rootFd = AcquireDirectoryDescriptor(ref rootReferenceAdded);
+            if (ExistsCore(rootFd, name) && unlinkat(rootFd, name, 0) != 0)
+            {
+                throw NativeError("Removing temporary store file");
+            }
+        }
+        finally
+        {
+            if (rootReferenceAdded)
+            {
+                _directory.DangerousRelease();
+            }
         }
     }
 
     public void Dispose() => _directory.Dispose();
 
-    private int Fd => checked((int)_directory.DangerousGetHandle());
+    private int AcquireDirectoryDescriptor(ref bool rootReferenceAdded)
+    {
+        // A raw Linux directory fd is not protected from concurrent Dispose.
+        // DangerousAddRef prevents close/reuse until DangerousRelease in finally.
+        _directory.DangerousAddRef(ref rootReferenceAdded);
+        return checked((int)_directory.DangerousGetHandle());
+    }
 
     private int OpenChild(string name, int flags, uint mode)
     {
         ValidateName(name);
-        int descriptor = openat(Fd, name, flags, mode);
-        if (descriptor < 0)
+        bool rootReferenceAdded = false;
+        try
         {
-            throw NativeError("Opening store child");
-        }
+            int rootFd = AcquireDirectoryDescriptor(ref rootReferenceAdded);
+            int descriptor = openat(rootFd, name, flags, mode);
+            if (descriptor < 0)
+            {
+                throw NativeError("Opening store child");
+            }
 
-        return descriptor;
+            // The child fd remains independently valid after releasing rootFd.
+            return descriptor;
+        }
+        finally
+        {
+            if (rootReferenceAdded)
+            {
+                _directory.DangerousRelease();
+            }
+        }
     }
 
     private static FileStream AsStream(int descriptor, FileAccess access)

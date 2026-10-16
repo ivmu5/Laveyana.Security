@@ -9,6 +9,8 @@ Each phase explicitly records purpose, changes, dependencies, acceptance criteri
 ---
 
 
+> **H01 infrastructure phase: CLOSED (2026-10-16).** Verified Release/NUnit on both OSes, protected `master`, and first successful manual monthly-regression run. [Closure evidence](../hardening/H01-Setup.md). This checkpoint does not close Phase 27 security findings or permit production use of the experimental filesystem store.
+
 > **Current verification status (2026-10-16):** H01 `Verify` passed Release builds and NUnit on both Windows and Ubuntu, plus source/docs checks. Earlier functional phases are not thereby production-accepted: Windows TOCTOU, rollback and nonce lifetime gates remain open. Historical “not yet tested” remarks refer to the phase at the time. See [README](../../README.md) and [security review](../audit/Laveyana.Security.Phase27.SecurityAudit.md).
 
 ## Phase 1 — Repository foundation

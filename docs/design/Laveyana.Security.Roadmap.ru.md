@@ -9,6 +9,8 @@
 ---
 
 
+> **Инфраструктурный этап H01: ЗАКРЫТ (16.10.2026).** Подтверждены Release/NUnit на обеих ОС, защита `master` и первый успешный ручной запуск месячной регрессии. [Подтверждения закрытия](../hardening/H01-Setup.ru.md). Это не закрывает проблемы безопасности Phase 27 и не разрешает production-использование экспериментального файлового хранилища.
+
 > **Текущий статус верификации (2026-10-16):** H01 `Verify` успешно прошёл Release-сборку и NUnit на Windows/Ubuntu, а также source/docs checks. Функциональные фазы до Phase 27 по-прежнему нельзя считать production-accepted: Windows TOCTOU, rollback и nonce lifetime gates остаются открытыми. Исторические замечания о непроверенной сборке относятся к моменту соответствующего этапа. См. [README](../../README.ru.md) и [security review](../audit/Laveyana.Security.Phase27.SecurityAudit.ru.md).
 
 ## Phase 1 — Основа repository

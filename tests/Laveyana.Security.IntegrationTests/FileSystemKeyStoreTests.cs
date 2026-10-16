@@ -678,7 +678,8 @@ public sealed class FileSystemKeyStoreTests
                 FileSystemSecurity acl = Directory.Exists(path)
                     ? FileSystemAclExtensions.GetAccessControl(new DirectoryInfo(path))
                     : FileSystemAclExtensions.GetAccessControl(new FileInfo(path));
-                string ownerSid = acl.GetOwner(typeof(SecurityIdentifier)).Value;
+                string ownerSid = (acl.GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier)?.Value
+                    ?? "<null>";
                 TestContext.Progress.WriteLine($"ACL DIAGNOSTIC: {Path.GetFileName(path)} OwnerSid={ownerSid}");
             }
         }

@@ -4,6 +4,12 @@
 
 This changelog records **unreleased development checkpoints**, not production releases or successful security acceptance. Version configured in `Directory.Build.props`: `1.2610.0-alpha.1`. No public package, compatibility promise or release tag is asserted by this document.
 
+## Unreleased — H01: nightly regression workflow (2026-10-16)
+
+- Removed duplicate `Verify` runs on open Pull Request branches: Pull Requests are checked once, and pushes to `master` are verified after merge. All three required check names remain unchanged.
+- Added a separately scheduled/manually triggered `Nightly` workflow with five sequential full NUnit runs per OS, per-attempt platform-aware TRX verification, locked restore, Release build, 14-day report artifacts and a per-runner timeout. The normal required `Verify` checks remain unchanged.
+- The workflow has not yet executed on GitHub; it becomes available on the default branch only after merge. This is additional regression coverage, **not** security acceptance or closure of Phase 27 findings.
+
 ## Unreleased — H01: compiler diagnostic fixes (2026-10-16)
 
 **H01 verification update (16 October 2026):** Both hosted runners now pass `Verify`: `Source & docs`, `Build & NUnit (ubuntu-latest)`, and `Build & NUnit (windows-latest)`. Added dependency lock files; resolved CI-only Windows ACL token-owner behavior, Linux secure-descriptor stream initialization, and Linux test `umask` assumptions. Installed the active `Protect master` ruleset requiring PRs and the three checks. These milestones close the initial build/CI setup, **not** Phase 27 security acceptance.

@@ -94,7 +94,7 @@ dotnet build Laveyana.Security.sln -c Release --no-restore -warnaserror
 dotnet test Laveyana.Security.sln -c Release --no-build --no-restore
 ```
 
-GitHub Actions runs `Source & docs`, `Build & NUnit (ubuntu-latest)` and `Build & NUnit (windows-latest)` on push/pull requests, with TRX results. An active `Protect master` ruleset targets the default branch, requires a pull request and all three checks, and blocks force pushes/deletion. The main branch is currently named `master`. Local success does not substitute for platform or security acceptance. More: [H01 verification workflow](docs/hardening/H01-Setup.md).
+GitHub Actions runs `Source & docs`, `Build & NUnit (ubuntu-latest)` and `Build & NUnit (windows-latest)` for every pull request and after pushes to `master` (not for standalone pushes to topic branches), with TRX results. An active `Protect master` ruleset targets the default branch, requires a pull request and all three checks, and blocks force pushes/deletion. The main branch is currently named `master`. A separate [Nightly workflow](.github/workflows/nightly.yml) is configured for five repeated full NUnit runs on each OS, scheduled daily or started manually after merge to the default branch; its first successful execution is not yet verified. Local success does not substitute for platform or security acceptance. More: [H01 verification workflow](docs/hardening/H01-Setup.md).
 
 ## Security and lifecycle boundaries
 

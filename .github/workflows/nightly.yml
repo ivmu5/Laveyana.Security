@@ -1,18 +1,24 @@
-name: Nightly Extended Regression
+name: Nightly
 
+# Scheduled runs execute on the default branch only.
+# Manual runs become available once this file is merged into the default branch.
 on:
   schedule:
-    - cron: '17 3 * * *'
+    - cron: '17 2 * * *' # Daily at 02:17 UTC (avoids top-of-hour congestion).
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: nightly-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  repeated-tests:
-    name: Nightly repeated tests (${{ matrix.os }})
+  repeat-nunit:
+    name: Nightly NUnit (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 80
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -22,37 +28,87 @@ jobs:
           - os: windows-latest
             platform: Windows
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.4xx'
-      - uses: actions/setup-python@v5
+
+      - name: Set up Python for TRX validation
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Public API layout, braces and enum docs
-        run: python tools/verify_api_layout.py
-      - name: Restore and build
-        shell: bash
+
+      - name: Verify SDK
+        run: dotnet --info
+
+      - name: Restore with locked dependencies
+        run: dotnet restore Laveyana.Security.sln --locked-mode
+
+      - name: Build Release (warnings as errors)
+        run: dotnet build Laveyana.Security.sln --no-restore -c Release -warnaserror
+
+      - name: Repeat unit and integration suites five times
+        shell: pwsh
+        env:
+          TEST_PLATFORM: ${{ matrix.platform }}
         run: |
-          dotnet restore Laveyana.Security.sln --locked-mode
-          dotnet build Laveyana.Security.sln --no-restore -c Release -warnaserror
-      - name: Repeat complete test suites three times
-        shell: bash
-        run: |
-          set -euo pipefail
-          for round in 1 2 3; do
-            mkdir -p "artifacts/nightly/round-$round/unit" "artifacts/nightly/round-$round/integration"
-            dotnet test tests/Laveyana.Security.Tests/Laveyana.Security.Tests.csproj --no-build --no-restore -c Release --logger "trx;LogFileName=unit-$round.trx" --results-directory "artifacts/nightly/round-$round/unit"
-            dotnet test tests/Laveyana.Security.IntegrationTests/Laveyana.Security.IntegrationTests.csproj --no-build --no-restore -c Release --logger "trx;LogFileName=integration-$round.trx" --results-directory "artifacts/nightly/round-$round/integration"
-          done
-      - name: Check all platform test runs
-        shell: bash
-        run: |
-          set -euo pipefail
-          for round in 1 2 3; do
-            python tools/check_trx.py --platform "${{ matrix.platform }}" --results-dir "artifacts/nightly/round-$round"
-          done
-      - name: Publish nightly test reports
+          # Nonzero native exit codes are checked explicitly so all five attempts run.
+          $PSNativeCommandUseErrorActionPreference = $false
+          $anyFailed = $false
+          if ($env:GITHUB_STEP_SUMMARY) {
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "### Nightly NUnit ($env:TEST_PLATFORM)"
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "`n| Attempt | Result |`n| --- | --- |"
+          }
+          foreach ($attempt in 1..5) {
+            $results = "artifacts/nightly/attempt-$attempt"
+            Write-Host "===== Attempt $attempt / 5 ($env:TEST_PLATFORM) ====="
+            $failed = $false
+
+            # Keep separate TRX files for every suite and repetition.
+            dotnet test tests/Laveyana.Security.Tests/Laveyana.Security.Tests.csproj `
+              --no-build --no-restore -c Release `
+              --logger 'trx;LogFileName=unit.trx' `
+              --results-directory "$results/unit"
+            if ($LASTEXITCODE -ne 0) { $failed = $true }
+
+            dotnet test tests/Laveyana.Security.IntegrationTests/Laveyana.Security.IntegrationTests.csproj `
+              --no-build --no-restore -c Release `
+              --logger 'trx;LogFileName=integration.trx' `
+              --results-directory "$results/integration"
+            if ($LASTEXITCODE -ne 0) { $failed = $true }
+
+            # Fail if either project did not produce its own test report.
+            foreach ($expected in @("$results/unit/unit.trx", "$results/integration/integration.trx")) {
+              if (-not (Test-Path -LiteralPath $expected -PathType Leaf)) {
+                Write-Warning "Missing test report: $expected"
+                $failed = $true
+              }
+            }
+
+            # Validate each attempt in isolation, including OS-specific passing tests.
+            python tools/check_trx.py --platform $env:TEST_PLATFORM --results-dir $results
+            if ($LASTEXITCODE -ne 0) { $failed = $true }
+
+            $outcome = if ($failed) { 'FAILED' } else { 'PASSED' }
+            Write-Host "Attempt $attempt $outcome"
+            if ($env:GITHUB_STEP_SUMMARY) {
+              Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "| $attempt | $outcome |"
+            }
+            if ($failed) { $anyFailed = $true }
+          }
+
+          if ($anyFailed) {
+            Write-Error 'At least one of five nightly test attempts failed.'
+            exit 1
+          }
+          Write-Host 'All five nightly test attempts passed.'
+
+      - name: Upload per-attempt TRX reports
         if: always()
         uses: actions/upload-artifact@v4
         with:

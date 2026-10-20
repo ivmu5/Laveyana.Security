@@ -49,6 +49,9 @@ public sealed class FileSystemKeyStore : IKeyStore, IDisposable
     /// <summary>Filesystem snapshots have no independent rollback-resistant authority.</summary>
     public KeyStoreCapabilities Capabilities { get; } = new(false);
 
+    private static bool IsValidLockTimeout(TimeSpan timeout) =>
+        timeout > TimeSpan.Zero && timeout <= TimeSpan.FromMinutes(5);
+
     /// <summary>Opens an initialized store using an explicitly selected root protector.</summary>
     /// <remarks>Rejects missing or corrupt data rather than silently recreating it.</remarks>
     public static async ValueTask<FileSystemKeyStore> OpenAsync(FileSystemKeyStoreOptions options,
@@ -57,7 +60,7 @@ public sealed class FileSystemKeyStore : IKeyStore, IDisposable
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(protector);
         if (!protector.CurrentReference.IsDefined ||
-            options.LockTimeout <= TimeSpan.Zero || options.LockTimeout > TimeSpan.FromMinutes(5) ||
+            !IsValidLockTimeout(options.LockTimeout) ||
             options.ExpectedStoreInstanceId == Guid.Empty)
         {
             throw new ArgumentException("Invalid store options or protector identity.");
@@ -89,6 +92,7 @@ public sealed class FileSystemKeyStore : IKeyStore, IDisposable
         ArgumentNullException.ThrowIfNull(currentAndLegacyProtector);
         if (!legacyReference.IsDefined || !currentAndLegacyProtector.CurrentReference.IsDefined ||
             legacyReference == currentAndLegacyProtector.CurrentReference ||
+            !IsValidLockTimeout(options.LockTimeout) ||
             !options.EnableExperimentalWrites || !options.ExpectedStoreInstanceId.HasValue ||
             options.ExpectedStoreInstanceId == Guid.Empty || !Directory.Exists(options.RootDirectory))
         {

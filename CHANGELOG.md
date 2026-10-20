@@ -5,6 +5,12 @@
 This changelog records **unreleased development checkpoints**, not production releases or successful security acceptance. Version configured in `Directory.Build.props`: `1.2610.0-alpha.1`. No public package, compatibility promise or release tag is asserted by this document.
 
 
+## Unreleased — SA-03 Stage 2B1: read-only rollback inspection (2026-10-20)
+
+- Add optional `FileSystemKeyStoreOptions.RollbackAuthority` **for experimental read-only inspection only**. Every load authenticates the exact file bytes, reads an external checkpoint and requires a committed match with no pending transition. Missing/foreign/outdated/pending authority state fails closed; network exceptions propagate.
+- Reject experimental writes, migration opens and unpinned store UUID when this option is used; no cleanup or fallback. Add seven cross-platform integration tests using a volatile authority test double.
+- **Not protected mode / not production safety**: ordinary `OpenAsync` without the option can still bypass the check; downgrade prevention, safe durable staging, commit/recovery, server authority, SA-04 and SA-08 remain OPEN. `ProvidesRollbackProtection=false`, Phase 27 NO-GO.
+
 ## Unreleased — SA-03 Stage 2A: request resolution contracts (2026-10-20)
 
 - Add an optional, source-compatible request-aware rollback authority contract with durable per-request decisions and mandatory fencing of late RPCs before declaring `NotApplied`.

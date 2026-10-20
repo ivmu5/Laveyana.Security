@@ -94,3 +94,9 @@ Run on a machine with .NET SDK 10:
 ```
 
 **This patch has not been compiled or run in the packaging environment.** Require Windows/Linux CI evidence on the exact revision, plus independent provider/recovery implementation and adversarial reviews, before considering SA-03 closed.
+
+### Stage 2B1: read-only file inspection (experimental)
+
+`FileSystemKeyStoreOptions.RollbackAuthority` opts into a **read-only inspection probe**, not a protected storage profile. Opening requires `ExpectedStoreInstanceId` and `EnableExperimentalWrites=false`. Every authenticated `LoadAsync` compares the **same original persisted bytes** with a fresh authority observation under the store lock; only `CommittedMatch` permits returning records. Missing authority, pending intent, foreign UUID, replayed snapshot and authority I/O errors fail closed. This option provides no auto enrollment, prepare, publication, finalize or recovery.
+
+**No downgrade guarantee:** a caller can still omit the option or use an old binary to open the existing v1 snapshot. `ProvidesRollbackProtection` remains `false`, even with the option supplied. This temporary capability is strictly for testing Stage 1 gates against real authenticated filesystem snapshots. Stage 2B protected writes require new outer format/profile pin, durable candidate + intent, request-fenced CAS, recovery and verified filesystem barriers. Do not use with production secrets.

@@ -1,3 +1,5 @@
+using Laveyana.Security.Abstractions.Rollback;
+
 namespace Laveyana.Security.FileSystem.Storage;
 
 /// <summary>Explicit opt-in configuration for the Phase 13 filesystem prototype.</summary>
@@ -32,6 +34,18 @@ public sealed class FileSystemKeyStoreOptions
 
     /// <summary>Optionally pins the expected store UUID against unexpected bootstrap replacement.</summary>
     public Guid? ExpectedStoreInstanceId { get; init; }
+
+    /// <summary>Optional external checkpoint validation on each read (experimental, read-only).</summary>
+    /// <remarks>
+    /// Stage 2B1 only: when provided, requires a pinned ExpectedStoreInstanceId and
+    /// EnableExperimentalWrites=false. Every load authenticates the exact persisted bytes
+    /// and requires a committed authority match with no pending intent. Missing/failed
+    /// authority reads reject access; no fallback or recovery is attempted.
+    /// This is NOT a protected writable profile: the existing ordinary OpenAsync can
+    /// still be invoked without this option, so downgrade resistance is not enforced.
+    /// Capabilities.ProvidesRollbackProtection remains false. Do not use for real secrets.
+    /// </remarks>
+    public IKeyStoreRollbackAuthority? RollbackAuthority { get; init; }
 
     /// <summary>Maximum duration for cooperative interprocess lock acquisition.</summary>
     public TimeSpan LockTimeout { get; init; } = TimeSpan.FromSeconds(15);

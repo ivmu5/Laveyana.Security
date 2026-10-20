@@ -50,6 +50,9 @@ REQUIRED_INTEGRATION = (
     "FileSystemKeyStoreTests.ReadOnlyOpenPreservesPendingFilesAndCommittedStoreBytes",
     "FileSystemKeyStoreTests.ReadOnlyOpenDoesNotCleanPendingFilesWhenSnapshotIsInvalid",
     "FileSystemKeyStoreTests.CorruptSnapshotNeverRecreatesOrUsesUnauthenticatedState",
+    "FileSystemKeyStoreTests.RollbackReadGateAcceptsExactAuthenticatedCommittedSnapshot",
+    "FileSystemKeyStoreTests.RollbackReadGateRejectsReplayedValidOldSnapshot",
+    "FileSystemKeyStoreTests.RollbackReadGateRejectsBothPendingOldAndPendingNewSnapshot",
 )
 
 REQUIRED_PLATFORM = {

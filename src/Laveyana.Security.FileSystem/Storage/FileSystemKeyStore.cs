@@ -4,6 +4,7 @@ using System.Text;
 using Laveyana.Security.Abstractions.Identifiers;
 using Laveyana.Security.Abstractions.Persistence;
 using Laveyana.Security.Abstractions.Protection;
+using Laveyana.Security.Abstractions.Rollback;
 using Laveyana.Security.Abstractions.Sensitive;
 using Laveyana.Security.Abstractions.Storage;
 using static Laveyana.Security.FileSystem.Storage.FileSystemSnapshotCodec;
@@ -66,6 +67,16 @@ public sealed class FileSystemKeyStore : IKeyStore, IDisposable
             throw new ArgumentException("Invalid store options or protector identity.");
         }
 
+        // Stage 2B1: external authority verification is read-only until durable
+        // staging/publication/recovery and downgrade protection are implemented.
+        if (options.RollbackAuthority is not null &&
+            (options.EnableExperimentalWrites || !options.ExpectedStoreInstanceId.HasValue ||
+             options.ExpectedStoreInstanceId == Guid.Empty))
+        {
+            throw new ArgumentException(
+                "Rollback inspection requires read-only access and a pinned store UUID.", nameof(options));
+        }
+
         FileSystemKeyStore store = new(options, protector);
         try
         {
@@ -93,6 +104,7 @@ public sealed class FileSystemKeyStore : IKeyStore, IDisposable
         if (!legacyReference.IsDefined || !currentAndLegacyProtector.CurrentReference.IsDefined ||
             legacyReference == currentAndLegacyProtector.CurrentReference ||
             !IsValidLockTimeout(options.LockTimeout) ||
+            options.RollbackAuthority is not null ||
             !options.EnableExperimentalWrites || !options.ExpectedStoreInstanceId.HasValue ||
             options.ExpectedStoreInstanceId == Guid.Empty || !Directory.Exists(options.RootDirectory))
         {
@@ -422,6 +434,22 @@ public sealed class FileSystemKeyStore : IKeyStore, IDisposable
         }
 
         State verifiedState = DecodeBody(body);
+
+        if (_options.RollbackAuthority is not null)
+        {
+            // Compare the EXACT bytes authenticated above; do not reserialize the model.
+            // A missing, foreign or pending authority state is never readable.
+            // An authority failure propagates: there is no unprotected fallback.
+            RollbackAuthorityState? authority = await _options.RollbackAuthority
+                .ReadAsync(_instanceId, cancellationToken).ConfigureAwait(false);
+            if (RollbackSnapshotGate.Inspect(_instanceId, bytes, authority) !=
+                RollbackSnapshotInspection.CommittedMatch)
+            {
+                throw new InvalidDataException(
+                    "Rollback authority did not confirm this exact committed store snapshot.");
+            }
+        }
+
         _lastSnapshotReference = authentication.Protector;
         return verifiedState;
     }

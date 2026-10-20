@@ -630,3 +630,15 @@ correlation, real AES-GCM outcomes, and broken sinks. Real .NET 10 compilation,
 NUnit execution, and Windows/Linux security testing are not yet confirmed; Phase 25
 and the overall production gate remain open.
 
+
+---
+
+## D58. SA-03 rollback state is external, store-wide and fail-closed (2026-10-20)
+
+**Decision**
+
+Introduce an optional rollback authority contract in Abstractions, anchored to the pinned store UUID and a monotonically increasing **whole-snapshot** sequence and digest. Use durable compare-and-swap prepare/finalize transitions; no implicit first-open enrollment, pending-state reads or reset to a prior checkpoint. Keep filesystem capabilities false until independently trusted external authority and recovery are implemented and verified.
+
+**Rationale**
+
+A correctly authenticated historical filesystem snapshot can still be replayed. Per-key revisions and self-contained MACs cannot detect this without a separate rollback-resistant trust domain. See [SA-03 contract](Laveyana.Security.RollbackAuthorityContract.md). **Contract stage only; SA-03 OPEN.**

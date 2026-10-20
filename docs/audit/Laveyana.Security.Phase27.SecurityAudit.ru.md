@@ -366,3 +366,7 @@
 - Успешные тесты гонок не доказывают отсутствие всех возможных interleavings; полномасштабная проверка с моделированием отключения питания и независимый security review остаются самостоятельными release gates.
 - **SA-03 (rollback/replay) и SA-04 (durable nonce uniqueness) — OPEN**. SA-08 и остальные незакрытые требования исходного Phase 27 review также не закрываются данным решением.
 - **Phase 27: NO-GO** для production и настоящих секретов. **Windows и Linux filesystem backends: `EXPERIMENTAL / TEST ONLY`.** Закрытие SA-02 не отменяет эти ограничения и само по себе не разрешает выпуск/использование в production.
+
+### Контрольная точка SA-03 — контракт независимого authority (20 октября 2026 года)
+
+Добавлен `Laveyana.Security.Abstractions.Rollback` (неизменяемые контрольные точки всего хранилища, модель confirmed/pending, необязательный CAS-контракт внешнего authority, запрет чтения при несоответствии), а также NUnit-тесты контракта. Подробнее: [контракт SA-03](../design/Laveyana.Security.RollbackAuthorityContract.ru.md). На этом этапе нет интеграции с FileSystemKeyStore, реального долговечного независимого authority, протокола восстановления или платформенных security-тестов; `ProvidesRollbackProtection` не изменён. **SA-03 ОТКРЫТА, SA-04 ОТКРЫТА, Phase 27 NO-GO, FileSystem EXPERIMENTAL / TEST ONLY.** Сборка/тесты этой конкретной версии в среде упаковки не подтверждены.

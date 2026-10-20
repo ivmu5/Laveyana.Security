@@ -366,3 +366,7 @@ Tests use private reflection only to access the existing internal Linux director
 - Successful bounded concurrency tests are not an exhaustive proof against every schedule; full power-loss fault injection and independent security review remain distinct release gates.
 - **SA-03 (rollback/replay) and SA-04 (durable nonce uniqueness): OPEN.** SA-08 and other incomplete Phase 27 review gates are not closed by this disposition.
 - **Phase 27: NO-GO** for production and real secrets. **Windows/Linux filesystem backends: `EXPERIMENTAL / TEST ONLY`.** Closing SA-02 does not authorize production deployment or change those restrictions.
+
+### SA-03 checkpoint — independent rollback authority contract (20 October 2026)
+
+Added `Laveyana.Security.Abstractions.Rollback` (immutable per-store checkpoints, pending/committed model, optional authority CAS contract, fail-closed snapshot gate) and contract-level NUnit regression cases. See [rollback contract](../design/Laveyana.Security.RollbackAuthorityContract.md). No filesystem hook, actual trusted durable authority, crash recovery integration or platform security tests are delivered by this change; no filesystem capability flag is raised. **SA-03 OPEN, SA-04 OPEN, Phase 27 NO-GO, filesystem EXPERIMENTAL / TEST ONLY.** Build/tests on the exact patched revision remain unverified in this packaging environment.

@@ -4,6 +4,12 @@
 
 This changelog records **unreleased development checkpoints**, not production releases or successful security acceptance. Version configured in `Directory.Build.props`: `1.2610.0-alpha.1`. No public package, compatibility promise or release tag is asserted by this document.
 
+
+## Unreleased — SA-03 contract stage 1 (2026-10-20)
+
+- Added an optional independently trusted rollback authority contract, whole-snapshot checkpoints, and fail-closed comparison gate in Abstractions. Added NUnit contract tests and bilingual design/security notes.
+- No FileSystemKeyStore integration, trusted authority provider or nonce changes; **SA-03/SA-04 OPEN, Phase 27 NO-GO**. Build/tests require verification on .NET SDK 10.
+
 ## Unreleased — H01 infrastructure closeout (2026-10-16)
 
 - **H01 closed (build, CI and repository hardening only):** successful required checks, protected `master`, three merged Pull Requests and a passing manual extended regression on Windows/Ubuntu. See the [H01 closure record](docs/hardening/H01-Setup.md).

@@ -26,6 +26,11 @@ public sealed class SecurityObservability
     private static readonly Counter<long> AuditDeliveryFailures = Metrics.CreateCounter<long>(
         "laveyana.security.audit.delivery_failures", description: "Best-effort audit delivery failures.");
 
+    // Shared process budget: a broken sink must not create an unbounded number of
+    // pending callbacks, including when callers create many observability instances.
+    private const int MaxConcurrentAuditDeliveries = 8;
+    private static int _activeAuditDeliveries;
+
     private readonly ILogger<SecurityObservability>? _logger;
     private readonly ISecurityAuditSink? _auditSink;
     private readonly TimeProvider _timeProvider;
@@ -53,7 +58,8 @@ public sealed class SecurityObservability
 
     /// <summary>
     /// Observes one operation. Only the fixed operation and outcome are recorded; payload and exceptions
-    /// are never passed to listeners. Audit delivery failure cannot change a committed operation outcome.
+    /// are never passed to listeners. Audit dispatch is bounded and asynchronous; completion,
+    /// delivery order and persistence are not guaranteed. A sink cannot delay an operation return.
     /// </summary>
     public async ValueTask<T> ObserveAsync<T>(SecurityOperation operation,
         Func<CancellationToken, ValueTask<T>> action, CancellationToken cancellationToken = default)
@@ -134,12 +140,11 @@ public sealed class SecurityObservability
                     {
                         SecurityAuditEvent audit = new(operation, outcome, _timeProvider.GetUtcNow(),
                             activity?.TraceId.ToString());
-                        await _auditSink.WriteAsync(audit, CancellationToken.None).ConfigureAwait(false);
+                        DispatchAuditBestEffort(_auditSink, audit);
                     }
                     catch (Exception)
                     {
-                        // Best-effort notification only: do not imply durable auditing or successful delivery.
-                        try { AuditDeliveryFailures.Add(1); } catch (Exception) { }
+                        RecordAuditDeliveryFailure();
                     }
                 }
             }
@@ -153,6 +158,78 @@ public sealed class SecurityObservability
                 }
             }
         }
+    }
+
+    private static void DispatchAuditBestEffort(ISecurityAuditSink sink, SecurityAuditEvent audit)
+    {
+        if (!TryReserveAuditDelivery())
+        {
+            // Never queue behind stalled sinks. This event is intentionally dropped.
+            RecordAuditDeliveryFailure();
+            return;
+        }
+
+        try
+        {
+            // A sink may block synchronously before returning its ValueTask.
+            // Dispatch off the operation path and never await its completion there.
+            // Do not propagate ambient Activity/AsyncLocal values to application-owned sinks.
+            if (ExecutionContext.IsFlowSuppressed())
+            {
+                _ = Task.Run(() => DeliverAuditAsync(sink, audit));
+            }
+            else
+            {
+                using (ExecutionContext.SuppressFlow())
+                {
+                    _ = Task.Run(() => DeliverAuditAsync(sink, audit));
+                }
+            }
+        }
+        catch (Exception)
+        {
+            Interlocked.Decrement(ref _activeAuditDeliveries);
+            RecordAuditDeliveryFailure();
+        }
+    }
+
+    private static bool TryReserveAuditDelivery()
+    {
+        while (true)
+        {
+            int current = Volatile.Read(ref _activeAuditDeliveries);
+            if (current >= MaxConcurrentAuditDeliveries)
+            {
+                return false;
+            }
+
+            if (Interlocked.CompareExchange(ref _activeAuditDeliveries, current + 1, current) == current)
+            {
+                return true;
+            }
+        }
+    }
+
+    private static async Task DeliverAuditAsync(ISecurityAuditSink sink, SecurityAuditEvent audit)
+    {
+        try
+        {
+            await sink.WriteAsync(audit, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            RecordAuditDeliveryFailure();
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _activeAuditDeliveries);
+        }
+    }
+
+    private static void RecordAuditDeliveryFailure()
+    {
+        // Includes rejected deliveries when the fixed process budget is exhausted.
+        try { AuditDeliveryFailures.Add(1); } catch (Exception) { }
     }
 
     private static void EndActivityBestEffort(Activity? activity, Activity? previousActivity)

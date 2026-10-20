@@ -853,3 +853,13 @@ delivery. A trace ID may appear in a separate audit event but never as a metric
 label. Applications manage listeners, ILogger providers, metric exporters, and audit
 persistence. Unconfigured telemetry cannot affect library behavior.
 
+**SA-05 implementation note:** Optional audit notifications run on ThreadPool workers,
+never inline on the cryptographic completion path. At most eight audit callbacks
+are active process-wide; there is no application-level backlog queue, replay, retry,
+flush-on-stop, or synchronous completion guarantee. On saturation, new notifications
+are dropped; late callback exceptions and dropped events increment the failure counter.
+Events may be reordered and callbacks may overlap. Caller ambient `ExecutionContext`
+is not captured for delivery. A malicious synchronous callback can still occupy one
+of these bounded background workers indefinitely; this is not process isolation
+or suitable for a mandatory audit trail.
+

@@ -5,6 +5,13 @@
 This changelog records **unreleased development checkpoints**, not production releases or successful security acceptance. Version configured in `Directory.Build.props`: `1.2610.0-alpha.1`. No public package, compatibility promise or release tag is asserted by this document.
 
 
+## Unreleased — Phase 27: F-02 / SA-05 non-blocking optional audit (2026-10-20)
+
+- Dispatch `ISecurityAuditSink` callbacks off the cryptographic operation path. Blocking synchronous or never-completing asynchronous sinks cannot delay operation completion or change its success/exception.
+- Introduce a fixed process-wide in-flight budget of eight audit callbacks, with no pending queue or retry. Overflow events are dropped and counted by the existing `laveyana.security.audit.delivery_failures` metric. Late callback exceptions are swallowed and counted.
+- Prevent propagation of the caller's `ExecutionContext` to audit callbacks. Deliveries may overlap, arrive out of order, or be lost on process shutdown; they are **not** a compliance-grade, durable audit-of-record.
+- Update observability tests for asynchronous arrival; add regressions for async hangs, synchronous blocking, bounded overload and ambient context isolation. No new public types or dependencies. SA-03/SA-04/SA-08 remain open; **Phase 27 production NO-GO**. NUnit validation is required.
+
 ## Unreleased — Phase 27: F-05 FileSystem lock timeout validation (2026-10-20)
 
 - Use one internal `LockTimeout` range check for both regular and migration store opens: positive values up to five minutes, inclusive.

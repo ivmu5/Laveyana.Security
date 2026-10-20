@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Threading.Channels;
 using System.Diagnostics.Metrics;
 using System.Security.Cryptography;
 using System.Text;
@@ -32,14 +33,14 @@ internal sealed class SecurityObservabilityTests
         Assert.That(logger.Messages, Has.Count.EqualTo(1));
         Assert.That(logger.Messages[0], Does.Not.Contain(Sentinel));
         Assert.That(logger.Messages[0], Does.Contain("Encrypt"));
-        Assert.That(audit.Events, Has.Count.EqualTo(1));
-        Assert.That(audit.Events[0].Outcome, Is.EqualTo(SecurityOperationOutcome.Success));
-        Assert.That(audit.Events[0].ToString(), Does.Not.Contain(Sentinel));
+        SecurityAuditEvent[] delivered = await audit.ReadAsync(1);
+        Assert.That(delivered[0].Outcome, Is.EqualTo(SecurityOperationOutcome.Success));
+        Assert.That(delivered[0].ToString(), Does.Not.Contain(Sentinel));
 
         Assert.ThrowsAsync<InvalidOperationException>(async () => await telemetry.ObserveAsync(
             SecurityOperation.Encrypt, _ => throw new InvalidOperationException(Sentinel)));
         Assert.That(logger.Messages[1], Does.Not.Contain(Sentinel));
-        Assert.That(audit.Events[1].Outcome, Is.EqualTo(SecurityOperationOutcome.Error));
+        Assert.That((await audit.ReadAsync(1))[0].Outcome, Is.EqualTo(SecurityOperationOutcome.Error));
     }
 
     [Test]
@@ -56,7 +57,7 @@ internal sealed class SecurityObservabilityTests
         cancellation.Cancel();
         Assert.ThrowsAsync<OperationCanceledException>(async () => await telemetry.ObserveAsync<int>(
             SecurityOperation.ReadSecret, ct => throw new OperationCanceledException(ct), cancellation.Token));
-        Assert.That(audit.Events.Select(item => item.Outcome).ToArray(), Is.EqualTo(new[]
+        Assert.That((await audit.ReadAsync(4)).Select(item => item.Outcome), Is.EquivalentTo(new[]
         {
             SecurityOperationOutcome.Negative, SecurityOperationOutcome.Negative,
             SecurityOperationOutcome.Rejected, SecurityOperationOutcome.Canceled
@@ -264,12 +265,128 @@ internal sealed class SecurityObservabilityTests
         Assert.That(entireLog, Does.Not.Contain(Sentinel));
         Assert.That(entireLog, Does.Not.Contain("PrivateIdentity"));
         Assert.That(entireLog, Does.Not.Contain(descriptor.KeyId.ToString()));
-        Assert.That(audit.Events.Last().Outcome, Is.EqualTo(SecurityOperationOutcome.Negative));
-        Assert.That(audit.Events.Select(item => item.Operation), Is.EqualTo(new[]
+        SecurityAuditEvent[] delivered = await audit.ReadAsync(5);
+        Assert.That(delivered.Single(item => item.Operation == SecurityOperation.TryDecrypt).Outcome,
+            Is.EqualTo(SecurityOperationOutcome.Negative));
+        Assert.That(delivered.Select(item => item.Operation), Is.EquivalentTo(new[]
         {
             SecurityOperation.CreateKey, SecurityOperation.ReadKey,
             SecurityOperation.Encrypt, SecurityOperation.Decrypt, SecurityOperation.TryDecrypt
         }));
+    }
+
+    [Test]
+    public async Task NeverCompletingAuditDoesNotDelaySuccessOrReplaceOriginalError()
+    {
+        StalledAsyncAudit audit = new();
+        SecurityObservability telemetry = new(auditSink: audit);
+        int executed = 0;
+        try
+        {
+            int result = await telemetry.ObserveAsync(SecurityOperation.CreateKey, _ =>
+            {
+                executed++;
+                return ValueTask.FromResult(91);
+            }).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.That(result, Is.EqualTo(91));
+            await audit.ReadStartedAsync();
+
+            InvalidOperationException expected = new("original-action-error");
+            InvalidOperationException? actual = Assert.ThrowsAsync<InvalidOperationException>(async () =>
+                await telemetry.ObserveAsync<int>(SecurityOperation.RotateKey, _ =>
+                {
+                    executed++;
+                    throw expected;
+                }).AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.That(actual, Is.SameAs(expected));
+            await audit.ReadStartedAsync();
+            Assert.That(executed, Is.EqualTo(2));
+        }
+        finally
+        {
+            audit.Release();
+        }
+    }
+
+    [Test]
+    public async Task SynchronouslyBlockingAuditDoesNotBlockCaller()
+    {
+        using BlockingSynchronousAudit audit = new();
+        SecurityObservability telemetry = new(auditSink: audit);
+        try
+        {
+            // Start on a separate thread so a regression to inline dispatch cannot hang NUnit.
+            Task<int> operation = Task.Run(async () => await telemetry.ObserveAsync(
+                SecurityOperation.CreateKey, _ => ValueTask.FromResult(43)));
+            Assert.That(await operation.WaitAsync(TimeSpan.FromSeconds(5)), Is.EqualTo(43));
+            Assert.That(audit.Entered.Wait(TimeSpan.FromSeconds(5)), Is.True);
+        }
+        finally
+        {
+            audit.Release.Set();
+        }
+    }
+
+    [Test]
+    public async Task StalledAuditConsumesFixedBudgetAndExcessEventsAreDropped()
+    {
+        StalledAsyncAudit audit = new();
+        SecurityObservability telemetry = new(auditSink: audit);
+        long failures = 0;
+        using MeterListener meter = new();
+        meter.InstrumentPublished = (instrument, listener) =>
+        {
+            if (instrument.Meter.Name == SecurityObservability.MeterName &&
+                instrument.Name == "laveyana.security.audit.delivery_failures")
+            {
+                listener.EnableMeasurementEvents(instrument);
+            }
+        };
+        meter.SetMeasurementEventCallback<long>((_, value, _, _) => Interlocked.Add(ref failures, value));
+        meter.Start();
+        try
+        {
+            for (int i = 0; i < 8; i++)
+            {
+                Assert.That(await telemetry.ObserveAsync(SecurityOperation.CreateKey,
+                    _ => ValueTask.FromResult(i)), Is.EqualTo(i));
+            }
+
+            for (int i = 0; i < 8; i++)
+            {
+                await audit.ReadStartedAsync();
+            }
+
+            Assert.That(await telemetry.ObserveAsync(SecurityOperation.CreateKey,
+                _ => ValueTask.FromResult(99)), Is.EqualTo(99));
+            Assert.That(audit.StartedCount, Is.EqualTo(8));
+            Assert.That(Volatile.Read(ref failures), Is.GreaterThanOrEqualTo(1));
+        }
+        finally
+        {
+            audit.Release();
+            // Let the already-scheduled audit callbacks leave the global budget.
+            await Task.Delay(100);
+        }
+    }
+
+    [Test]
+    public async Task AuditWorkerDoesNotInheritCallerAmbientContext()
+    {
+        AsyncLocal<string?> ambient = new();
+        ambient.Value = Sentinel;
+        AmbientAudit audit = new(ambient);
+        try
+        {
+            SecurityObservability telemetry = new(auditSink: audit);
+            Assert.That(await telemetry.ObserveAsync(SecurityOperation.CreateKey,
+                _ => ValueTask.FromResult(63)), Is.EqualTo(63));
+            Assert.That(await audit.ReadObservedAsync(), Is.Null);
+        }
+        finally
+        {
+            ambient.Value = null;
+        }
     }
 
     [Test]
@@ -288,10 +405,84 @@ internal sealed class SecurityObservabilityTests
 
     private sealed class CaptureAudit : ISecurityAuditSink
     {
-        internal List<SecurityAuditEvent> Events { get; } = [];
+        private readonly Channel<SecurityAuditEvent> _events = Channel.CreateUnbounded<SecurityAuditEvent>();
+
+        internal async Task<SecurityAuditEvent[]> ReadAsync(int count)
+        {
+            using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
+            SecurityAuditEvent[] result = new SecurityAuditEvent[count];
+            for (int i = 0; i < count; i++)
+            {
+                result[i] = await _events.Reader.ReadAsync(timeout.Token);
+            }
+
+            return result;
+        }
+
         public ValueTask WriteAsync(SecurityAuditEvent auditEvent, CancellationToken cancellationToken = default)
         {
-            Events.Add(auditEvent);
+            _events.Writer.TryWrite(auditEvent);
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class StalledAsyncAudit : ISecurityAuditSink
+    {
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly Channel<bool> _started = Channel.CreateUnbounded<bool>();
+        private int _startedCount;
+
+        internal int StartedCount => Volatile.Read(ref _startedCount);
+
+        internal async Task ReadStartedAsync()
+        {
+            using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
+            await _started.Reader.ReadAsync(timeout.Token);
+        }
+
+        internal void Release() => _release.TrySetResult();
+
+        public ValueTask WriteAsync(SecurityAuditEvent auditEvent, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _startedCount);
+            _started.Writer.TryWrite(true);
+            return new ValueTask(_release.Task);
+        }
+    }
+
+    private sealed class BlockingSynchronousAudit : ISecurityAuditSink, IDisposable
+    {
+        internal ManualResetEventSlim Entered { get; } = new(false);
+        internal ManualResetEventSlim Release { get; } = new(false);
+
+        public ValueTask WriteAsync(SecurityAuditEvent auditEvent, CancellationToken cancellationToken = default)
+        {
+            Entered.Set();
+            Release.Wait();
+            return ValueTask.CompletedTask;
+        }
+
+        public void Dispose()
+        {
+            Release.Set();
+            Entered.Dispose();
+            Release.Dispose();
+        }
+    }
+
+    private sealed class AmbientAudit(AsyncLocal<string?> ambient) : ISecurityAuditSink
+    {
+        private readonly Channel<string?> _observed = Channel.CreateUnbounded<string?>();
+
+        internal async Task<string?> ReadObservedAsync()
+        {
+            using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
+            return await _observed.Reader.ReadAsync(timeout.Token);
+        }
+
+        public ValueTask WriteAsync(SecurityAuditEvent auditEvent, CancellationToken cancellationToken = default)
+        {
+            _observed.Writer.TryWrite(ambient.Value);
             return ValueTask.CompletedTask;
         }
     }

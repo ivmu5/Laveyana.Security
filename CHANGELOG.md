@@ -5,6 +5,12 @@
 This changelog records **unreleased development checkpoints**, not production releases or successful security acceptance. Version configured in `Directory.Build.props`: `1.2610.0-alpha.1`. No public package, compatibility promise or release tag is asserted by this document.
 
 
+## Unreleased — SA-03 Stage 2B2: authenticated candidate staging (2026-10-20)
+
+- Add an internal handle-relative two-file journal for the exact next snapshot and root-protector-authenticated request intent; checkpoint, pinned store UUID and distinct prepare/finalize IDs are bound and checked.
+- The journal is never silently overwritten or discarded. Add six Windows/Linux integration scenarios for exact byte recovery, duplicate attempts, tampering, partial generations and identity/digest binding.
+- **Not a writable protected profile:** no authority RPC, no recovery or downgrade pin, and Windows directory power-loss durability is unproven. `ProvidesRollbackProtection=false`; SA-03/SA-04/SA-08 OPEN, Phase 27 NO-GO.
+
 ## Unreleased — SA-03 Stage 2B1: read-only rollback inspection (2026-10-20)
 
 - Add optional `FileSystemKeyStoreOptions.RollbackAuthority` **for experimental read-only inspection only**. Every load authenticates the exact file bytes, reads an external checkpoint and requires a committed match with no pending transition. Missing/foreign/outdated/pending authority state fails closed; network exceptions propagate.

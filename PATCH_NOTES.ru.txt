@@ -1,0 +1,28 @@
+Laveyana.Security — SA-03 Stage 2B2: authenticated candidate staging
+2026-10-20
+
+ПРИМЕНЕНИЕ
+1. Убедитесь, что Stage 2B1 (+IDE0011 fix) уже слит в master и получите последние изменения через Visual Studio Pull.
+2. Создайте отдельную ветку: security/sa03-candidate-journal.
+3. Распакуйте ZIP в корень репозитория с сохранением структуры и заменой существующих CHANGELOG/docs/tools файлов.
+4. Соберите Release и запустите ВСЕ NUnit-тесты. На Windows ожидается 433 passed / 0 failed / 23 skipped (если базовая версия та же).
+5. Пришлите архив результатов тестирования перед коммитом/PR.
+
+ОБЛАСТЬ ИЗМЕНЕНИЙ
+- Два новых внутренних компонента: RollbackPreparedWrite и RollbackCandidateJournal.
+- AssemblyInfo.cs только для InternalsVisibleTo IntegrationTests.
+- Шесть интеграционных тестов, три из них добавлены в обязательную TRX-проверку.
+- Обновлены design notes EN/RU и CHANGELOG EN/RU.
+- НЕТ вызовов внешнего authority, автоматического восстановления, поддержки защищённой записи, изменений обычных IKeyStore методов и новых публичных API.
+
+ОГРАНИЧЕНИЕ БЕЗОПАСНОСТИ
+Файлы журнала НЕ создаются существующими операциями IKeyStore. Это изолированный проверяемый компонент для последующей интеграции.
+Windows power-loss durability после переименования каталога НЕ доказана; отправлять prepare RPC на основании этого кода нельзя.
+ProvidesRollbackProtection=false; Phase 27 NO-GO.
+
+ПРОВЕРЕНО ПРИ СБОРКЕ ПАТЧА
+- Python verify_api_layout.py: PASS
+- Python verify_repository.py: PASS
+- Python test_check_trx.py: 11 PASS
+- Проверка документации: четыре прежние ошибки об отсутствии .github/workflows/nightly.yml в экспорте исходников.
+- Компиляция .NET/NUnit не выполнялись в среде упаковки.

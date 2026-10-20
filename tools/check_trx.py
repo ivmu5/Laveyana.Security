@@ -53,6 +53,9 @@ REQUIRED_INTEGRATION = (
     "FileSystemKeyStoreTests.RollbackReadGateAcceptsExactAuthenticatedCommittedSnapshot",
     "FileSystemKeyStoreTests.RollbackReadGateRejectsReplayedValidOldSnapshot",
     "FileSystemKeyStoreTests.RollbackReadGateRejectsBothPendingOldAndPendingNewSnapshot",
+    "FileSystemKeyStoreTests.RollbackCandidateJournalPersistsExactSnapshotAndTwoStableRequestIds",
+    "FileSystemKeyStoreTests.RollbackCandidateJournalRejectsTamperedAuthenticatedIntent",
+    "FileSystemKeyStoreTests.RollbackCandidateJournalFailsClosedOnPartialStageAndKeepsEvidence",
 )
 
 REQUIRED_PLATFORM = {

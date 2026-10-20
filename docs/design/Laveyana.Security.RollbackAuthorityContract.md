@@ -100,3 +100,17 @@ Run on a machine with .NET SDK 10:
 `FileSystemKeyStoreOptions.RollbackAuthority` opts into a **read-only inspection probe**, not a protected storage profile. Opening requires `ExpectedStoreInstanceId` and `EnableExperimentalWrites=false`. Every authenticated `LoadAsync` compares the **same original persisted bytes** with a fresh authority observation under the store lock; only `CommittedMatch` permits returning records. Missing authority, pending intent, foreign UUID, replayed snapshot and authority I/O errors fail closed. This option provides no auto enrollment, prepare, publication, finalize or recovery.
 
 **No downgrade guarantee:** a caller can still omit the option or use an old binary to open the existing v1 snapshot. `ProvidesRollbackProtection` remains `false`, even with the option supplied. This temporary capability is strictly for testing Stage 1 gates against real authenticated filesystem snapshots. Stage 2B protected writes require new outer format/profile pin, durable candidate + intent, request-fenced CAS, recovery and verified filesystem barriers. Do not use with production secrets.
+
+
+### Stage 2B2: authenticated local candidate journal (experimental, NO remote mutations)
+
+The internal `RollbackCandidateJournal` stages **two separate, never-overwritten files** in the already-pinned secure store directory, while the caller holds the exclusive store lock:
+
+- `.rollback-candidate.lsfs`: **exact bytes** of the intended next already-authenticated snapshot (no reserialization during restore).
+- `.rollback-intent.lsfs`: a root-protector-authenticated, domain-separated intent binding the pinned store UUID, current and next global checkpoints, snapshot byte count and **distinct prepare/finalize request IDs**. The next sequence is exactly current + 1.
+
+The candidate is written, flushed, checked and renamed before the intent file is written. Both use existing handle-relative file creation/rename and exclusive destination creation. Files are never automatically deleted or overwritten; a partial pair is an error requiring controlled recovery. Legacy `.pending-*.tmp` cleanup does not target these entries. On reading, the intent signature, candidate snapshot authentication and exact checkpoint digest are verified; the journal must never be trusted solely because the files exist.
+
+**Scope boundary:** This is an isolated internal staging primitive exercised by six new integration tests. No application-facing protected writer, enrollment, authority `prepare` or `finalize`, use of `ResolveAsync`, recovery policy, profile pin or downgrade protection has been enabled. In particular, **an experimental journal file on its own must not suppress ordinary v1 opens** because protected mode does not exist yet. The helper is not invoked by existing `IKeyStore` write paths. `ProvidesRollbackProtection=false`, SA-03/SA-04/SA-08 OPEN, Phase 27 NO-GO.
+
+**Durability warning:** Linux's directory-relative `Move` currently fsyncs the parent directory after rename. Windows' namespace durability after the native rename has **not** been verified for abrupt power loss (and filesystem/hardware guarantees vary). Staging passing tests is not permission to contact a real authority: durable file and namespace barriers on each supported platform must first be reviewed and confirmed. Once writes are integrated, protected-root profile markers, incomplete journals, pending authority state and any ambiguous RPC result must all fail closed rather than falling back to v1.

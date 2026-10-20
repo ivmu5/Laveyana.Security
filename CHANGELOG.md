@@ -5,6 +5,12 @@
 This changelog records **unreleased development checkpoints**, not production releases or successful security acceptance. Version configured in `Directory.Build.props`: `1.2610.0-alpha.1`. No public package, compatibility promise or release tag is asserted by this document.
 
 
+## Unreleased — Phase 27: F-05 FileSystem lock timeout validation (2026-10-20)
+
+- Use one internal `LockTimeout` range check for both regular and migration store opens: positive values up to five minutes, inclusive.
+- Add Windows/Linux integration regressions for invalid and boundary timeout values, checking that invalid opens do not mutate store files.
+- No public API, snapshot format, or locking behavior changes. SA-03/SA-04/SA-05 remain open; **Phase 27 production NO-GO**.
+
 ## Unreleased — Phase 27: F-01 tracing isolation (2026-10-20)
 
 - Isolated `Activity` creation, callbacks and disposal from managed operation outcomes; best-effort cleanup restores the previous ambient tracing context after listener failures.

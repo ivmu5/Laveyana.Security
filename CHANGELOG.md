@@ -5,6 +5,13 @@
 This changelog records **unreleased development checkpoints**, not production releases or successful security acceptance. Version configured in `Directory.Build.props`: `1.2610.0-alpha.1`. No public package, compatibility promise or release tag is asserted by this document.
 
 
+## Unreleased — SA-03 Stage 2A: request resolution contracts (2026-10-20)
+
+- Add an optional, source-compatible request-aware rollback authority contract with durable per-request decisions and mandatory fencing of late RPCs before declaring `NotApplied`.
+- Add immutable `RollbackRequestId` and three-way `RollbackRequestResolution` outcomes. Existing Stage 1 contracts remain unchanged.
+- Add eleven NUnit contract tests with a deliberately volatile fake for delayed prepare/enroll, lost replies, idempotency, tuple/UUID binding and prevention of untracked mutation bypass.
+- Extend the required CI TRX test list for key request-fencing regressions; update the rollback authority design notes (EN/RU), including durable candidate/intent staging BEFORE any request is sent. **No remote provider, FileSystem integration or production guarantee. SA-03/SA-04 OPEN; Phase 27 NO-GO.**
+
 ## Unreleased — Phase 27: F-02 / SA-05 non-blocking optional audit (2026-10-20)
 
 - Dispatch `ISecurityAuditSink` callbacks off the cryptographic operation path. Blocking synchronous or never-completing asynchronous sinks cannot delay operation completion or change its success/exception.

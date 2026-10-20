@@ -65,9 +65,23 @@ public sealed class SecurityObservability
         }
 
         long start = Stopwatch.GetTimestamp();
-        using Activity? activity = Activities.StartActivity("security.operation", ActivityKind.Internal);
         string operationName = operation.ToString();
-        activity?.SetTag("security.operation", operationName);
+        Activity? previousActivity = Activity.Current;
+        Activity? activity = null;
+        try
+        {
+            // Create first so a throwing ActivityStarted callback cannot hide a started Activity.
+            // Sampling, start and tags are all optional, untrusted diagnostic operations.
+            activity = Activities.CreateActivity("security.operation", ActivityKind.Internal);
+            activity?.Start();
+            activity?.SetTag("security.operation", operationName);
+        }
+        catch (Exception)
+        {
+            EndActivityBestEffort(activity, previousActivity);
+            activity = null;
+        }
+
         SecurityOperationOutcome outcome = SecurityOperationOutcome.Error;
         try
         {
@@ -91,39 +105,80 @@ public sealed class SecurityObservability
         }
         finally
         {
-            string outcomeName = outcome.ToString();
-            activity?.SetTag("security.outcome", outcomeName);
-            TagList tags = new()
-            {
-                { "security.operation", operationName },
-                { "security.outcome", outcomeName }
-            };
-            // Telemetry sinks are untrusted extensions; neither success nor failures may be rewritten by them.
             try
             {
-                Operations.Add(1, tags);
-                Duration.Record(Stopwatch.GetElapsedTime(start).TotalMilliseconds, tags);
-                _logger?.LogInformation("Security operation {Operation} finished with {Outcome}",
-                    operationName, outcomeName);
-            }
-            catch (Exception)
-            {
-                // Optional diagnostics must never change a security operation result.
-            }
-
-            if (_auditSink is not null)
-            {
+                string outcomeName = outcome.ToString();
+                // Activity tags and the ActivityStopped callback can invoke external instrumentation.
+                try { activity?.SetTag("security.outcome", outcomeName); } catch (Exception) { }
+                TagList tags = new()
+                {
+                    { "security.operation", operationName },
+                    { "security.outcome", outcomeName }
+                };
+                // Telemetry sinks are untrusted extensions; neither success nor failures may be rewritten by them.
                 try
                 {
-                    SecurityAuditEvent audit = new(operation, outcome, _timeProvider.GetUtcNow(),
-                        activity?.TraceId.ToString());
-                    await _auditSink.WriteAsync(audit, CancellationToken.None).ConfigureAwait(false);
+                    Operations.Add(1, tags);
+                    Duration.Record(Stopwatch.GetElapsedTime(start).TotalMilliseconds, tags);
+                    _logger?.LogInformation("Security operation {Operation} finished with {Outcome}",
+                        operationName, outcomeName);
                 }
                 catch (Exception)
                 {
-                    // Best-effort notification only: do not imply durable auditing or successful delivery.
-                    try { AuditDeliveryFailures.Add(1); } catch (Exception) { }
+                    // Optional diagnostics must never change a security operation result.
                 }
+
+                if (_auditSink is not null)
+                {
+                    try
+                    {
+                        SecurityAuditEvent audit = new(operation, outcome, _timeProvider.GetUtcNow(),
+                            activity?.TraceId.ToString());
+                        await _auditSink.WriteAsync(audit, CancellationToken.None).ConfigureAwait(false);
+                    }
+                    catch (Exception)
+                    {
+                        // Best-effort notification only: do not imply durable auditing or successful delivery.
+                        try { AuditDeliveryFailures.Add(1); } catch (Exception) { }
+                    }
+                }
+            }
+            finally
+            {
+                // Dispose invokes ActivityStopped, which may throw before resetting Activity.Current.
+                // Never let a tracing listener replace the original action result or exception.
+                if (activity is not null)
+                {
+                    EndActivityBestEffort(activity, previousActivity);
+                }
+            }
+        }
+    }
+
+    private static void EndActivityBestEffort(Activity? activity, Activity? previousActivity)
+    {
+        try
+        {
+            activity?.Dispose();
+        }
+        catch (Exception)
+        {
+            // A listener must not affect the security operation.
+        }
+        finally
+        {
+            try
+            {
+                // Activity.Stop may exit through a listener before restoring the AsyncLocal parent.
+                // Restoring Activity.Current may invoke application callbacks, so it is guarded too.
+                if (!ReferenceEquals(Activity.Current, previousActivity))
+                {
+                    Activity.Current = previousActivity;
+                }
+            }
+            catch (Exception)
+            {
+                // No diagnostic callback may replace an operation result.
             }
         }
     }

@@ -74,6 +74,129 @@ internal sealed class SecurityObservabilityTests
     }
 
     [Test]
+    public async Task ThrowingSamplerDoesNotPreventActionOrChangeItsException()
+    {
+        using Activity parent = new("test.parent");
+        parent.Start();
+        using ActivityListener listener = new()
+        {
+            ShouldListenTo = source => source.Name == SecurityObservability.ActivitySourceName,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) =>
+                throw new InvalidOperationException(Sentinel)
+        };
+        ActivitySource.AddActivityListener(listener);
+
+        SecurityObservability telemetry = new();
+        int executions = 0;
+        int result = await telemetry.ObserveAsync(SecurityOperation.CreateKey, _ =>
+        {
+            executions++;
+            Assert.That(Activity.Current, Is.SameAs(parent));
+            return ValueTask.FromResult(17);
+        });
+        Assert.That(result, Is.EqualTo(17));
+        Assert.That(executions, Is.EqualTo(1));
+        Assert.That(Activity.Current, Is.SameAs(parent));
+
+        InvalidOperationException original = new("action-failed");
+        InvalidOperationException? actual = Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await telemetry.ObserveAsync<int>(SecurityOperation.RotateKey, _ =>
+            {
+                executions++;
+                throw original;
+            }));
+        Assert.That(actual, Is.SameAs(original));
+        Assert.That(executions, Is.EqualTo(2));
+        Assert.That(Activity.Current, Is.SameAs(parent));
+    }
+
+    [Test]
+    public async Task ThrowingActivityStartedDoesNotLeakAmbientTraceOrRerunAction()
+    {
+        using Activity parent = new("test.parent");
+        parent.Start();
+        using ActivityListener listener = new()
+        {
+            ShouldListenTo = source => source.Name == SecurityObservability.ActivitySourceName,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+            ActivityStarted = _ => throw new InvalidOperationException(Sentinel)
+        };
+        ActivitySource.AddActivityListener(listener);
+
+        int executions = 0;
+        SecurityObservability telemetry = new();
+        int result = await telemetry.ObserveAsync(SecurityOperation.CreateKey, _ =>
+        {
+            executions++;
+            Assert.That(Activity.Current, Is.SameAs(parent));
+            return ValueTask.FromResult(27);
+        });
+        Assert.That(result, Is.EqualTo(27));
+        Assert.That(executions, Is.EqualTo(1));
+        Assert.That(Activity.Current, Is.SameAs(parent));
+    }
+
+    [Test]
+    public async Task ThrowingActivityStoppedCannotReplaceCommittedResultOrOriginalFailure()
+    {
+        using Activity parent = new("test.parent");
+        parent.Start();
+        using ActivityListener listener = new()
+        {
+            ShouldListenTo = source => source.Name == SecurityObservability.ActivitySourceName,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+            ActivityStopped = _ => throw new InvalidOperationException(Sentinel)
+        };
+        ActivitySource.AddActivityListener(listener);
+
+        SecurityObservability telemetry = new();
+        int executions = 0;
+        int result = await telemetry.ObserveAsync(SecurityOperation.CreateKey, _ =>
+        {
+            executions++;
+            return ValueTask.FromResult(37);
+        });
+        Assert.That(result, Is.EqualTo(37));
+        Assert.That(executions, Is.EqualTo(1));
+        Assert.That(Activity.Current, Is.SameAs(parent));
+
+        InvalidOperationException original = new("action-failed");
+        InvalidOperationException? actual = Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await telemetry.ObserveAsync<int>(SecurityOperation.RotateKey, _ =>
+            {
+                executions++;
+                throw original;
+            }));
+        Assert.That(actual, Is.SameAs(original));
+        Assert.That(executions, Is.EqualTo(2));
+        Assert.That(Activity.Current, Is.SameAs(parent));
+    }
+
+    [Test]
+    public async Task ThrowingStopListenerCannotChangeRealCommittedKeyCreation()
+    {
+        using ActivityListener listener = new()
+        {
+            ShouldListenTo = source => source.Name == SecurityObservability.ActivitySourceName,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+            ActivityStopped = _ => throw new InvalidOperationException(Sentinel)
+        };
+        ActivitySource.AddActivityListener(listener);
+
+        Activity? previousActivity = Activity.Current;
+        StorageContractsTests.MemoryStore store = new();
+        using SoftwareKeyProviderTests.TestProtector protector = new();
+        SoftwareKeyProviderBackend backend = new(Provider, store, protector, observability: new SecurityObservability());
+        KeyName name = new("TracingStopCannotInvalidateCommit");
+        KeyDescriptor created = await backend.CreateAsync(name, WellKnownAlgorithms.HmacSha256,
+            [WellKnownCapabilities.Mac, WellKnownCapabilities.VerifyMac]);
+
+        Assert.That(created.Name, Is.EqualTo(name));
+        Assert.That(await backend.FindByNameAsync(name), Is.Not.Null);
+        Assert.That(Activity.Current, Is.SameAs(previousActivity));
+    }
+
+    [Test]
     public async Task TracesAndMetricLabelsAreBoundedAndContainNoIdentity()
     {
         List<Activity> stopped = [];

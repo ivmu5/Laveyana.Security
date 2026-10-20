@@ -5,6 +5,12 @@
 This changelog records **unreleased development checkpoints**, not production releases or successful security acceptance. Version configured in `Directory.Build.props`: `1.2610.0-alpha.1`. No public package, compatibility promise or release tag is asserted by this document.
 
 
+## Unreleased — Phase 27: F-01 tracing isolation (2026-10-20)
+
+- Isolated `Activity` creation, callbacks and disposal from managed operation outcomes; best-effort cleanup restores the previous ambient tracing context after listener failures.
+- Added NUnit regressions for throwing tracing sampling/start/stop callbacks, original exception identity, single execution and an actual committed key creation.
+- No public API changes; SA-05 audit-sink liveness and SA-03/SA-04 remain open. **Phase 27 production NO-GO.** The new tests require .NET execution.
+
 ## Unreleased — SA-03 contract stage 1 (2026-10-20)
 
 - Added an optional independently trusted rollback authority contract, whole-snapshot checkpoints, and fail-closed comparison gate in Abstractions. Added NUnit contract tests and bilingual design/security notes.

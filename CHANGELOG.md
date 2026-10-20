@@ -5,6 +5,12 @@
 This changelog records **unreleased development checkpoints**, not production releases or successful security acceptance. Version configured in `Directory.Build.props`: `1.2610.0-alpha.1`. No public package, compatibility promise or release tag is asserted by this document.
 
 
+## Unreleased — SA-03 Stage 2B3: recovery state inspection (2026-10-20)
+
+- Add an internal, **read-only** recovery inspector for authenticated staged and active snapshots against a fresh authority state. Recognize four exact checkpoint combinations; block mismatches, replay and indistinguishable old/new digests.
+- Add eight Windows/Linux integration tests and three required CI TRX checks. No server RPC, disk mutation, automatic cleanup, or public API changes.
+- Observations are **not** permission to retry RPCs, publish, finalize, serve keys or claim power-loss durability; Windows filesystem namespace guarantee, downgrade prevention and recovery orchestration remain open. `ProvidesRollbackProtection=false`; SA-03/SA-04/SA-08 OPEN; Phase 27 NO-GO.
+
 ## Unreleased — SA-03 Stage 2B2: authenticated candidate staging (2026-10-20)
 
 - Add an internal handle-relative two-file journal for the exact next snapshot and root-protector-authenticated request intent; checkpoint, pinned store UUID and distinct prepare/finalize IDs are bound and checked.

@@ -114,3 +114,30 @@ The candidate is written, flushed, checked and renamed before the intent file is
 **Scope boundary:** This is an isolated internal staging primitive exercised by six new integration tests. No application-facing protected writer, enrollment, authority `prepare` or `finalize`, use of `ResolveAsync`, recovery policy, profile pin or downgrade protection has been enabled. In particular, **an experimental journal file on its own must not suppress ordinary v1 opens** because protected mode does not exist yet. The helper is not invoked by existing `IKeyStore` write paths. `ProvidesRollbackProtection=false`, SA-03/SA-04/SA-08 OPEN, Phase 27 NO-GO.
 
 **Durability warning:** Linux's directory-relative `Move` currently fsyncs the parent directory after rename. Windows' namespace durability after the native rename has **not** been verified for abrupt power loss (and filesystem/hardware guarantees vary). Staging passing tests is not permission to contact a real authority: durable file and namespace barriers on each supported platform must first be reviewed and confirmed. Once writes are integrated, protected-root profile markers, incomplete journals, pending authority state and any ambiguous RPC result must all fail closed rather than falling back to v1.
+
+### Stage 2B3: read-only recovery state inspection (experimental)
+
+`RollbackRecoveryInspector` compares a **previously authenticated** candidate/intent from
+`RollbackCandidateJournal.ReadAsync`, separately authenticated active snapshot bytes, the
+pinned store UUID and one fresh linearizable authority state. It does not call the authority
+or modify any file. It recognizes only four observations:
+
+| Observation | Exact combination seen |
+| --- | --- |
+| `StagedWithOldCommitObserved` | Active file and authority committed equal the old checkpoint; no pending. A delayed prepare may still apply. |
+| `PendingWithOldSnapshotObserved` | Authority pending equals the staged successor; active file matches the old checkpoint. |
+| `PendingWithCandidateObserved` | Authority pending equals the staged successor; active file matches the candidate. |
+| `FinalizedWithCandidateObserved` | Authority committed and active file match the staged successor; no pending. |
+
+All other states yield `Blocked`: absent/foreign/conflicting authority, changed snapshot,
+finalized authority with old active bytes, or old authority with prematurely published new
+bytes. Identical old/new byte commitments are ambiguous and also blocked. The observations
+are **diagnostic only**. They do not mean the local namespace is power-loss durable, resolve
+a lost `prepare`/`finalize` request ID, permit retries, finalize a pending authority state,
+remove staging, or authorize ordinary reads. Request decisions/fences, proof of durable
+publication, downgrade protection and a separate audited recovery state machine are still
+required. There is no protected write path, authority RPC or public API change.
+
+Eight cross-platform integration tests cover normal combinations, adversarial mismatches
+and authenticated journal inspection without file mutation. Three are mandatory TRX gate
+regressions. `ProvidesRollbackProtection=false`; SA-03/SA-04/SA-08 OPEN; Phase 27 NO-GO.

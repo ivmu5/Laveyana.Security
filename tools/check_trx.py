@@ -56,6 +56,9 @@ REQUIRED_INTEGRATION = (
     "FileSystemKeyStoreTests.RollbackCandidateJournalPersistsExactSnapshotAndTwoStableRequestIds",
     "FileSystemKeyStoreTests.RollbackCandidateJournalRejectsTamperedAuthenticatedIntent",
     "FileSystemKeyStoreTests.RollbackCandidateJournalFailsClosedOnPartialStageAndKeepsEvidence",
+    "FileSystemKeyStoreTests.RollbackRecoveryInspectorRejectsActiveRollbackAndUnexpectedPublication",
+    "FileSystemKeyStoreTests.RollbackRecoveryInspectorRejectsMissingForeignOrConflictingAuthorityState",
+    "FileSystemKeyStoreTests.RollbackRecoveryInspectorReadsAuthenticatedStageWithoutChangingAnyFiles",
 )
 
 REQUIRED_PLATFORM = {

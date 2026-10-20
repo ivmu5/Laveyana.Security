@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <EnableNETAnalyzers>false</EnableNETAnalyzers>
+    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
+    <ApplicationIcon Condition="Exists('Assets/Workbench.ico')">Assets/Workbench.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Laveyana.Security.App.LibraryWorkbench.Contracts/Laveyana.Security.App.LibraryWorkbench.Contracts.csproj" />
+    <ProjectReference Include="../Laveyana.Security.App.LibraryWorkbench.Worker/Laveyana.Security.App.LibraryWorkbench.Worker.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../../src/Laveyana.Security.Abstractions/Laveyana.Security.Abstractions.csproj" />
+    <ProjectReference Include="../../../src/Laveyana.Security/Laveyana.Security.csproj" />
+    <ProjectReference Include="../../../src/Laveyana.Security.Windows/Laveyana.Security.Windows.csproj" />
+    <ProjectReference Include="../../../src/Laveyana.Security.FileSystem/Laveyana.Security.FileSystem.csproj" />
+    <ProjectReference Include="../../../src/Laveyana.Security.DependencyInjection/Laveyana.Security.DependencyInjection.csproj" />
+  </ItemGroup>
+  <!-- The worker is built alongside the UI and copied with its runtime files. -->
+  <Target Name="CopyWorkbenchWorker" AfterTargets="Build">
+    <ItemGroup>
+      <WorkerRuntimeFiles Include="$(MSBuildProjectDirectory)/../Laveyana.Security.App.LibraryWorkbench.Worker/bin/$(Configuration)/net10.0/**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(WorkerRuntimeFiles)"
+          DestinationFiles="@(WorkerRuntimeFiles->'$(TargetDir)worker/%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" Condition="'@(WorkerRuntimeFiles)' != ''" />
+  </Target>
+</Project>

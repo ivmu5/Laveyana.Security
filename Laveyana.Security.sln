@@ -1,6 +1,6 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.0.31903.59
+# Visual Studio Version 18
+VisualStudioVersion = 18.10.12306.391 oobstable
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Laveyana.Security.Abstractions", "src\Laveyana.Security.Abstractions\Laveyana.Security.Abstractions.csproj", "{9C6EFFB7-CBB4-5B70-927A-BF34AEBBDC6C}"
 EndProject
@@ -15,6 +15,14 @@ EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Laveyana.Security.IntegrationTests", "tests\Laveyana.Security.IntegrationTests\Laveyana.Security.IntegrationTests.csproj", "{2195C120-3FE9-5604-A5C9-8AB24DB01455}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Laveyana.Security.Windows", "src\Laveyana.Security.Windows\Laveyana.Security.Windows.csproj", "{C027B253-78ED-5F84-AF03-D26755F8027B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Laveyana.Security.App.LibraryWorkbench", "tools\LibraryWorkbench\Laveyana.Security.App.LibraryWorkbench\Laveyana.Security.App.LibraryWorkbench.csproj", "{9370065D-E693-8768-2C1F-959BF156B309}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Laveyana.Security.App.LibraryWorkbench.Contracts", "tools\LibraryWorkbench\Laveyana.Security.App.LibraryWorkbench.Contracts\Laveyana.Security.App.LibraryWorkbench.Contracts.csproj", "{E6B89FDB-B063-3A3A-0BF1-07CCE13D6BC8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Laveyana.Security.App.LibraryWorkbench.Worker", "tools\LibraryWorkbench\Laveyana.Security.App.LibraryWorkbench.Worker\Laveyana.Security.App.LibraryWorkbench.Worker.csproj", "{96212435-09A5-88DA-FACB-B780CFDB050D}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "LibraryWorkbench", "LibraryWorkbench", "{1A83957D-0CB9-45AF-A764-21686556A153}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -50,8 +58,25 @@ Global
 		{C027B253-78ED-5F84-AF03-D26755F8027B}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{C027B253-78ED-5F84-AF03-D26755F8027B}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{C027B253-78ED-5F84-AF03-D26755F8027B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9370065D-E693-8768-2C1F-959BF156B309}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9370065D-E693-8768-2C1F-959BF156B309}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9370065D-E693-8768-2C1F-959BF156B309}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9370065D-E693-8768-2C1F-959BF156B309}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E6B89FDB-B063-3A3A-0BF1-07CCE13D6BC8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E6B89FDB-B063-3A3A-0BF1-07CCE13D6BC8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E6B89FDB-B063-3A3A-0BF1-07CCE13D6BC8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E6B89FDB-B063-3A3A-0BF1-07CCE13D6BC8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{96212435-09A5-88DA-FACB-B780CFDB050D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{96212435-09A5-88DA-FACB-B780CFDB050D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{96212435-09A5-88DA-FACB-B780CFDB050D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{96212435-09A5-88DA-FACB-B780CFDB050D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{9370065D-E693-8768-2C1F-959BF156B309} = {1A83957D-0CB9-45AF-A764-21686556A153}
+		{E6B89FDB-B063-3A3A-0BF1-07CCE13D6BC8} = {1A83957D-0CB9-45AF-A764-21686556A153}
+		{96212435-09A5-88DA-FACB-B780CFDB050D} = {1A83957D-0CB9-45AF-A764-21686556A153}
 	EndGlobalSection
 EndGlobal

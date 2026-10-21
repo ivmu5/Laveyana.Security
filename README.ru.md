@@ -8,6 +8,8 @@
 
 **Историческая база CI (16 октября 2026 года):** приложенная документация фиксирует успешные Release-проверки Windows/Ubuntu. Позднее SA-02 получил ограниченное закрытие. **Текущая сводная проверка (21 октября 2026 года): SA-03/SA-04/SA-08 OPEN; Phase 27 NO-GO.** Новый Linux-прогон описан в `VERIFICATION_REPORT.ru.md` комплекта исправлений; Windows и реальная потеря питания для этого комплекта не проверялись. См. [отчёт по безопасности](docs/audit/Laveyana.Security.Phase27.SecurityAudit.ru.md).
 
+**Решение об использовании (21 октября 2026 года):** допускается начать контролируемые внутренние пилоты с тестовыми/некритичными данными; хранение production-секретов и эксплуатационная файловая запись не одобрены. См. [известные ограничения и границы пилотного использования](docs/audit/Laveyana.Security.KnownLimitations.ru.md).
+
 ## Содержание
 
 - [Возможности](#возможности)
@@ -118,6 +120,7 @@ GitHub Actions запускает `Source & docs`, `Build & NUnit (ubuntu-latest
 | [Decision Log](docs/design/Laveyana.Security.DecisionLog.ru.md) | Принятые архитектурные решения (исторические DXX сохраняются). |
 | [Roadmap](docs/design/Laveyana.Security.Roadmap.ru.md) | Этапы работ и незакрытые условия релиза. |
 | [HPKE gate](docs/design/Laveyana.Security.HpkeGate.ru.md) · [Streaming gate](docs/design/Laveyana.Security.StreamingGate.ru.md) | Отложенные протокольные возможности и условия их появления. |
+| [Известные ограничения / пилотное использование](docs/audit/Laveyana.Security.KnownLimitations.ru.md) | Допустимые экспериментальные сценарии, открытые замечания и ограничения доказательств. |
 | [Security review Phase 27](docs/audit/Laveyana.Security.Phase27.SecurityAudit.ru.md) | Результаты статического аудита, последующая проверка H01 и оставшиеся риски. |
 | [Проверки H01](docs/hardening/H01-Setup.ru.md) · [История исправлений компиляции](docs/hardening/H01-CompilationRepair.ru.md) | Воспроизводимый CI и история компиляторных исправлений. |
 | [CHANGELOG](CHANGELOG.ru.md) | Изменения в ходе разработки и история релизов (выпуска пока нет). |

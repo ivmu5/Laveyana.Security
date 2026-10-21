@@ -1,0 +1,25 @@
+name: Android Native Signing Compile
+
+on:
+  pull_request:
+    paths:
+      - 'platforms/android/**'
+      - 'src/Laveyana.Security.Maui/NativeKeys/EcdsaDerSignatureCodec.cs'
+      - '.github/workflows/android-native.yml'
+  workflow_dispatch:
+
+jobs:
+  android-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Install Android workload
+        run: dotnet workload install android --skip-manifest-update
+      - name: Restore Android candidate
+        run: dotnet restore platforms/android/Laveyana.Security.Maui.Android/Laveyana.Security.Maui.Android.csproj --force-evaluate
+      - name: Build Android candidate
+        run: dotnet build platforms/android/Laveyana.Security.Maui.Android/Laveyana.Security.Maui.Android.csproj -c Release --no-restore -warnaserror

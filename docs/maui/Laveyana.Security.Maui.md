@@ -70,3 +70,29 @@ See Microsoft's [SecureStorage platform documentation](https://learn.microsoft.c
 - **New NuGet dependency/lock files require regeneration** from a trusted .NET 10 SDK machine before `--locked-mode` CI will pass. Use the project's existing `scripts/Initialize-LockFiles.ps1` procedure and commit the generated locks. Do not edit locks manually.
 - Run `verify_repository.py`, `verify_api_layout.py`, `verify_documentation.py`, Release build and NUnit; test MAUI Android/iOS/Mac Catalyst/Windows behavior on real supported targets before claiming a validated public package.
 - `IsPackable=false` remains inherited. Public NuGet publishing of this module is deferred until the integration is verified.
+
+## Experimental hardware signing — Windows TPM
+
+An optional `INativeSigningKeyService` low-level adapter supports creating,
+finding, and deleting persistent named ECDSA NIST P-256 keys via the **Microsoft
+Platform Crypto Provider (TPM)** on compatible Windows devices. It signs with
+SHA-256 and returns fixed-width 64-byte IEEE P1363 signatures and an exportable
+**public** SubjectPublicKeyInfo. Private key export and software fallback are
+not supported.
+
+Explicit registration: `services.AddLaveyanaWindowsTpmSigning(providerId)`.
+Application code must persist the provider/key IDs, never reuse deleted IDs,
+and handle uncertain create/delete outcomes. Keys may persist after an app
+crash. Deletion is not proof of physical erasure. The implementation is NOT
+`IKeyProviderBackend` / `IManagedSignatureBackend`: no versioned lifecycle,
+attestation, user-presence/biometrics, rollback resistance or cross-process CAS.
+
+Normal NUnit/CI runs exercise public-key validation and portable behavior.
+The real Windows TPM create/sign/delete test requires an explicit
+`LAVEYANA_RUN_TPM_TESTS=1` opt-in on a supported Windows PC and can leave a
+persistent key after process termination. It is intentionally skipped by
+default; passing CI **does not prove TPM hardware functionality**.
+
+Android Keystore and Apple Secure Enclave integrations are **not implemented**.
+This component is experimental and not accepted for production secrets or a
+stable NuGet release; SA-03/04/08 remain open.

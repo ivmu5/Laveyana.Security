@@ -171,16 +171,26 @@ public sealed partial class SoftwareKeyProviderBackend : IAuthenticatedEncryptio
         SoftwareKeyMetadata metadata = new(name, KeyKind.Symmetric, algorithm, copy,
             KeyLifecyclePlanner.Create(ProviderId, key, retention.ToConstraint()));
         KeyReference reference = new(ProviderId, key, new KeyVersion(1));
-        ProtectedStoreEnvelope material = await GenerateProtectedMaterialAsync(reference, cancellationToken)
-            .ConfigureAwait(false);
+        (ProtectedStoreEnvelope material, string? nonceFingerprint) = await GenerateProtectedMaterialAsync(
+            reference, algorithm == WellKnownAlgorithms.Aes256Gcm, cancellationToken).ConfigureAwait(false);
         ProtectedStoreEnvelope protection = await ProtectMetadataAsync(metadata, new KeyStoreRevision(1),
             cancellationToken).ConfigureAwait(false);
         KeyStoreCreateRequest request = new(ProviderId, key, name, protection,
             [KeyStoreMaterialChange.Upsert(reference, material)]);
         KeyStoreMutationResult result = await CommitCreateAsync(request, cancellationToken).ConfigureAwait(false);
+        if (result.Status == KeyStoreMutationStatus.Applied)
+        {
+            KeyDescriptor committed = ValidateRevision(result, 1, metadata).Describe();
+            if (nonceFingerprint is not null)
+            {
+                RegisterFreshNonceLifetime(reference, nonceFingerprint);
+            }
+
+            return committed;
+        }
+
         return result.Status switch
         {
-            KeyStoreMutationStatus.Applied => ValidateRevision(result, 1, metadata).Describe(),
             KeyStoreMutationStatus.NameTaken => throw new SoftwareKeyConflictException("NameTaken"),
             KeyStoreMutationStatus.KeyAlreadyExists => throw new SoftwareKeyConflictException("KeyAlreadyExists"),
             _ => throw UnknownResult("create")
@@ -345,12 +355,18 @@ public sealed partial class SoftwareKeyProviderBackend : IAuthenticatedEncryptio
         }
 
         List<KeyStoreMaterialChange> changes = new();
+        KeyReference? generatedReference = null;
+        string? generatedNonceFingerprint = null;
         if (generateMaterial)
         {
             KeyVersion version = transition.AffectedVersion ?? throw new InvalidOperationException("No new version planned.");
             KeyReference reference = new(ProviderId, handle.KeyId, version);
-            changes.Add(KeyStoreMaterialChange.Upsert(reference,
-                await GenerateProtectedMaterialAsync(reference, cancellationToken).ConfigureAwait(false)));
+            (ProtectedStoreEnvelope material, string? fingerprint) = await GenerateProtectedMaterialAsync(
+                reference, metadata.Algorithm == WellKnownAlgorithms.Aes256Gcm, cancellationToken)
+                .ConfigureAwait(false);
+            changes.Add(KeyStoreMaterialChange.Upsert(reference, material));
+            generatedReference = reference;
+            generatedNonceFingerprint = fingerprint;
         }
         else if (transition.AffectedVersion.HasValue &&
             transition.Current.Find(transition.AffectedVersion.Value)?.State == KeyVersionState.Deleted)
@@ -365,9 +381,19 @@ public sealed partial class SoftwareKeyProviderBackend : IAuthenticatedEncryptio
             .ConfigureAwait(false);
         KeyStoreReplaceRequest request = new(ProviderId, handle.KeyId, entry.Revision, protectedMetadata, changes);
         KeyStoreMutationResult result = await CommitReplaceAsync(request, cancellationToken).ConfigureAwait(false);
+        if (result.Status == KeyStoreMutationStatus.Applied)
+        {
+            SoftwareKeyMetadata committed = ValidateRevision(result, revision.Value, updated);
+            if (generatedReference.HasValue && generatedNonceFingerprint is not null)
+            {
+                RegisterFreshNonceLifetime(generatedReference.Value, generatedNonceFingerprint);
+            }
+
+            return committed;
+        }
+
         return result.Status switch
         {
-            KeyStoreMutationStatus.Applied => ValidateRevision(result, revision.Value, updated),
             KeyStoreMutationStatus.RevisionMismatch or KeyStoreMutationStatus.NotFound =>
                 throw new SoftwareKeyConflictException("ConcurrentMutation"),
             _ => throw UnknownResult("replace")
@@ -458,14 +484,24 @@ public sealed partial class SoftwareKeyProviderBackend : IAuthenticatedEncryptio
             cancellationToken).ConfigureAwait(false);
     }
 
-    private async ValueTask<ProtectedStoreEnvelope> GenerateProtectedMaterialAsync(KeyReference reference,
-        CancellationToken cancellationToken)
+    private async ValueTask<(ProtectedStoreEnvelope Envelope, string? NonceFingerprint)>
+        GenerateProtectedMaterialAsync(KeyReference reference, bool trackAesNonceLifetime,
+            CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         byte[] secret = RandomNumberGenerator.GetBytes(32);
         using SensitiveMaterialLease lease = SensitiveMaterialLease.TakeOwnership(secret);
-        return await _protector.ProtectAsync(lease, ProtectionPurpose.KeyMaterial,
+        ProtectedStoreEnvelope envelope = await _protector.ProtectAsync(lease, ProtectionPurpose.KeyMaterial,
             KeyStoreProtectionContext.ForKeyMaterial(reference), cancellationToken).ConfigureAwait(false);
+        string? fingerprint = null;
+        if (trackAesNonceLifetime)
+        {
+            lease.UseMaterial(material => fingerprint = NonceMaterialFingerprint(material));
+        }
+
+        // This is only a candidate. Do not create an active encryption budget until
+        // the caller verifies a successful store commit (including its revision).
+        return (envelope, fingerprint);
     }
 
     private async ValueTask<KeyStoreMutationResult> CommitCreateAsync(KeyStoreCreateRequest request,

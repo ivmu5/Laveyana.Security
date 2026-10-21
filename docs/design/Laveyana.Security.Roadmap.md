@@ -466,3 +466,8 @@ provider state and the application journal before continuing. This library does
 not provide a cross-provider transaction, distributed lock, application data
 re-encryption or rollback-resistant durable migration journal. Build/NUnit and
 production security gates remain open.
+
+## Consolidated SA-03 / SA-04 / SA-08 disposition — 21 October 2026
+
+- **Implemented:** shared pinned publication with deterministic fault boundaries and uncertain-commit diagnostics; process-kill/restart test harness; local-journal blocking in authority inspection; fresh-material-only randomized GCM lifetime, deterministic selection disabled, historical decryption preserved. Source metadata and verification are in the delivered patch reports.
+- **Still OPEN / BLOCKED:** integrated protected writable profile, downgrade-resistant enrollment/migration, authenticated persistent authority binding, request-aware recovery executor, independent production authority/nonce allocator, Windows namespace persistence proof and real power-cut testing. No HTTP/database server is introduced. SA-02 scoped closure and monthly/manual H01 policy stand; the attached export omits workflow files, so remote CI is not reverified here. **Phase 27 NO-GO; FileSystem EXPERIMENTAL / TEST ONLY; ProvidesRollbackProtection=false.**

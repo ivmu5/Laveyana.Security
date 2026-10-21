@@ -21,7 +21,8 @@ internal static class RollbackCandidateJournal
     private const int MaximumIntentLength = 4096 + ProtectedStoreEnvelope.MaximumEncodedLength;
 
     internal static async ValueTask StageAsync(LinuxSecureDirectory? linux, WindowsSecureDirectory? windows,
-        IKeyStoreProtector protector, RollbackPreparedWrite write, CancellationToken cancellationToken = default)
+        IKeyStoreProtector protector, RollbackPreparedWrite write, CancellationToken cancellationToken = default,
+        Action<StoreWriteBoundary, string>? fault = null)
     {
         ValidateDirectory(linux, windows);
         ArgumentNullException.ThrowIfNull(protector);
@@ -61,8 +62,8 @@ internal static class RollbackCandidateJournal
         byte[] signedIntent = EncodeFile(intent, signature);
         // Exact candidate must exist before the authenticated request record is made visible.
         // No authority RPC is implemented in this stage, including after an I/O error.
-        await WriteNewAsync(linux, windows, CandidateName, snapshot, cancellationToken).ConfigureAwait(false);
-        await WriteNewAsync(linux, windows, IntentName, signedIntent, cancellationToken).ConfigureAwait(false);
+        await WriteNewAsync(linux, windows, CandidateName, snapshot, cancellationToken, fault).ConfigureAwait(false);
+        await WriteNewAsync(linux, windows, IntentName, signedIntent, cancellationToken, fault).ConfigureAwait(false);
         RollbackPreparedWrite? persisted = await ReadAsync(linux, windows, protector,
             write.Prepared.StoreInstanceId, cancellationToken).ConfigureAwait(false);
         if (persisted is null || !persisted.Expected.Matches(write.Expected) ||
@@ -177,54 +178,10 @@ internal static class RollbackCandidateJournal
     private static byte[] IntentContext(Guid storeId) => Encoding.ASCII.GetBytes(
         $"Laveyana.Security/fs/v1/rollback-intent/{storeId:D}");
 
-    private static async ValueTask WriteNewAsync(LinuxSecureDirectory? linux, WindowsSecureDirectory? windows,
-        string name, byte[] bytes, CancellationToken cancellationToken)
-    {
-        string temporaryName = $".pending-{Guid.NewGuid():N}.tmp";
-        try
-        {
-            using (FileStream stream = linux is not null
-                ? linux.CreateTemporary(temporaryName)
-                : windows!.CreateTemporary(temporaryName))
-            {
-                await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
-                stream.Flush(true);
-            }
-
-            byte[] staged = await ReadFileAsync(linux, windows, temporaryName, bytes.Length,
-                cancellationToken).ConfigureAwait(false);
-            if (!staged.AsSpan().SequenceEqual(bytes))
-            {
-                throw new InvalidDataException("Rollback stage write differs from the candidate.");
-            }
-
-            cancellationToken.ThrowIfCancellationRequested();
-            if (Exists(linux, windows, name))
-            {
-                throw new InvalidOperationException("Concurrent rollback staging generation detected.");
-            }
-
-            if (linux is not null)
-            {
-                linux.Move(temporaryName, name, false);
-            }
-            else
-            {
-                windows!.Move(temporaryName, name, false);
-            }
-        }
-        finally
-        {
-            if (linux is not null)
-            {
-                linux.Remove(temporaryName);
-            }
-            else
-            {
-                windows!.Remove(temporaryName);
-            }
-        }
-    }
+    private static ValueTask WriteNewAsync(LinuxSecureDirectory? linux, WindowsSecureDirectory? windows,
+        string name, byte[] bytes, CancellationToken cancellationToken,
+        Action<StoreWriteBoundary, string>? fault) =>
+        StoreFilePublication.WriteAsync(linux, windows, name, bytes, false, cancellationToken, fault);
 
     private static async ValueTask<byte[]> ReadFileAsync(LinuxSecureDirectory? linux,
         WindowsSecureDirectory? windows, string name, int maximum, CancellationToken cancellationToken)

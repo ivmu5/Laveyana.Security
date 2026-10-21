@@ -642,3 +642,9 @@ Introduce an optional rollback authority contract in Abstractions, anchored to t
 **Rationale**
 
 A correctly authenticated historical filesystem snapshot can still be replayed. Per-key revisions and self-contained MACs cannot detect this without a separate rollback-resistant trust domain. See [SA-03 contract](Laveyana.Security.RollbackAuthorityContract.md). **Contract stage only; SA-03 OPEN.**
+
+## D59. Limit managed GCM to known material lifetimes; keep unproved protected writers disabled (2026-10-21)
+
+**Decision.** Use generating-instance provenance and a material-bound `2^20` randomized budget; reject reopened/imported unknown history and all supplied deterministic allocators in software AEAD. Keep historical decryption and explicit fresh-key rotation. Preserve the ordinary experimental filesystem format, false rollback capability, and the prohibition on authority-backed writes. Reject local journal evidence in read-only authority inspection. Preserve internal native Move signatures used by SA-02 regressions.
+
+**Alternatives and cost.** A process-wide counter would still forget other process lifetimes; a persisted local counter can roll back. A new allocator attestation framework or server would add unproved infrastructure. An apparent v2 marker cannot protect a restored pre-enrollment v1 backup when all local files can roll back and the caller uses legacy code/configuration. Therefore no protected format or enrollment is advertised. The deliberate compatibility cost is that a recreated software backend must rotate before new AES-GCM encryption. An independently trusted provider is the future alternative for persistent forward-encryption lifetimes. Memory snapshots and arbitrary code/trusted-configuration replacement are outside this bounded profile. No production guarantee or release gate is closed by this decision.

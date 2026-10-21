@@ -10,6 +10,7 @@ internal sealed record AeadNoncePolicyContext(
     AlgorithmId Algorithm,
     KeyStoreCapabilities StoreCapabilities,
     IRollbackProtectedNonceAllocator? Allocator,
-    AeadKeyOrigin Origin = AeadKeyOrigin.FreshlyGenerated,
+    AeadKeyOrigin Origin = AeadKeyOrigin.PersistedUnknownNonceHistory,
     AeadRestoreState RestoreState = AeadRestoreState.Clean,
-    AeadProviderNonceGuarantee ProviderGuarantee = AeadProviderNonceGuarantee.None);
+    AeadProviderNonceGuarantee ProviderGuarantee = AeadProviderNonceGuarantee.None,
+    AeadNoncePolicyEngine.NonceBudget? RandomizedBudget = null);

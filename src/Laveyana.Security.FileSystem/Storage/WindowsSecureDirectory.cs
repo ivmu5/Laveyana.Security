@@ -115,7 +115,11 @@ internal sealed class WindowsSecureDirectory : IDisposable
         return AsStream(handle, FileAccess.ReadWrite);
     }
 
-    internal void Move(string temporaryName, string destinationName, bool overwrite)
+    internal void Move(string temporaryName, string destinationName, bool overwrite) =>
+        MoveWithFault(temporaryName, destinationName, overwrite, null);
+
+    internal void MoveWithFault(string temporaryName, string destinationName, bool overwrite,
+        Action<StoreWriteBoundary, string>? fault)
     {
         ValidateName(destinationName);
         if (Exists(destinationName) && !overwrite)
@@ -166,6 +170,8 @@ internal sealed class WindowsSecureDirectory : IDisposable
             Marshal.FreeHGlobal(info);
         }
 
+        fault?.Invoke(StoreWriteBoundary.AfterRename, destinationName);
+        // Existence is only a logical check, NOT a namespace power-loss durability barrier.
         // Failure here is an uncertain commit; never blindly repeat a mutation.
         if (!Exists(destinationName))
         {

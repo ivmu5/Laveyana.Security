@@ -28,7 +28,7 @@ class TrxValidationTests(unittest.TestCase):
         definitions = ET.SubElement(root, "TestDefinitions")
         results = ET.SubElement(root, "Results")
         for index, qualified in enumerate(names, start=1):
-            klass, name = qualified.rsplit(".", 1)
+            klass, name = qualified.split(".", 1)
             test = ET.SubElement(definitions, "UnitTest", id=f"id-{index}", name=name)
             ET.SubElement(test, "TestMethod", className=suite + "." + klass,
                           name=name, codeBase=f"/run/{suite}.dll")
@@ -89,6 +89,19 @@ class TrxValidationTests(unittest.TestCase):
                  for x in check_trx.REQUIRED_INTEGRATION + check_trx.REQUIRED_PLATFORM["Windows"]]
         self._write(check_trx.INTEGRATION, names)
         self.assertIn(required + ": missing", " ".join(self._check(files, "Windows")))
+
+    def test_rejects_missing_one_real_writer_crash_boundary(self) -> None:
+        files = self._fixture("Linux")
+        required = 'FileSystemKeyStoreTests.KilledLibraryWriterReopensOneAuthenticatedSnapshot("AfterRename",True)'
+        names = [n for n in check_trx.REQUIRED_INTEGRATION + check_trx.REQUIRED_PLATFORM["Linux"] if n != required]
+        self._write(check_trx.INTEGRATION, names)
+        self.assertIn(required + ": missing", " ".join(self._check(files, "Linux")))
+
+    def test_rejects_skipped_nonce_history_guard(self) -> None:
+        files = self._fixture("Windows")
+        required = "SoftwareNonceLifetimeTests.ReopenedBackendRejectsForwardEncryptionButCanDecryptAndExplicitlyRotate"
+        self._write(check_trx.UNIT, list(check_trx.REQUIRED_UNIT), {required: "NotExecuted"})
+        self.assertIn(required, " ".join(self._check(files, "Windows")))
 
     def test_rejects_single_suite(self) -> None:
         files = self._fixture("Windows")

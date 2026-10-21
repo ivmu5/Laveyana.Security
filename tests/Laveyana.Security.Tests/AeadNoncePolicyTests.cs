@@ -24,7 +24,7 @@ internal sealed class AeadNoncePolicyTests
         AeadRestoreState restore = AeadRestoreState.Clean,
         AeadProviderNonceGuarantee provider = AeadProviderNonceGuarantee.None) =>
         new(Reference, WellKnownAlgorithms.Aes256Gcm, new KeyStoreCapabilities(protectedStore),
-            allocator, origin, restore, provider);
+            allocator, origin, restore, provider, new AeadNoncePolicyEngine.NonceBudget());
 
     [Test]
     public void SoftwareDefaultIsRandomizedWithoutIndependentAllocator()
@@ -35,12 +35,12 @@ internal sealed class AeadNoncePolicyTests
     }
 
     [Test]
-    public void DeterministicRequiresTwoSeparateVerifiedCapabilities()
+    public void DeterministicIsDisabledEvenWithBothUnverifiedCapabilities()
     {
         FakeAllocator allocator = new();
         Assert.Throws<CryptographicException>(() => AeadNoncePolicyEngine.Select(Context(allocator: allocator)));
-        Assert.That(AeadNoncePolicyEngine.Select(Context(true, allocator)),
-            Is.EqualTo(AeadNonceStrategy.RollbackProtectedDeterministic));
+        Assert.Throws<CryptographicException>(() => AeadNoncePolicyEngine.Select(Context(true, allocator)));
+        Assert.Throws<CryptographicException>(() => AeadNoncePolicyEngine.Create(Context(true, allocator)));
     }
 
     [Test]
@@ -108,7 +108,7 @@ internal sealed class AeadNoncePolicyTests
     public async Task RandomBudgetFailsClosedWithoutWrapping()
     {
         AeadNoncePolicyEngine.NonceBudget budget =
-            new(AeadNoncePolicyEngine.MaxRandomizedInvocationsPerProcessKey - 1);
+            new(AeadNoncePolicyEngine.MaxRandomizedInvocationsPerKeyLifetime - 1);
         using AeadNonceSession session = new(OtherReference, AeadNonceStrategy.Randomized, null, budget);
         Assert.That(await session.NextNonceAsync(0), Has.Length.EqualTo(12));
         Assert.ThrowsAsync<CryptographicException>(async () => { await session.NextNonceAsync(0); });
@@ -129,7 +129,7 @@ internal sealed class AeadNoncePolicyTests
     public async Task DeterministicEncodingIsBigEndianAndReusesOnlyReservedRange()
     {
         FakeAllocator authority = new(prefix: 0x11223344, first: 0x0102030405060708);
-        using AeadNonceSession session = AeadNoncePolicyEngine.Create(Context(true, authority));
+        using AeadNonceSession session = ModelDeterministicSession(Context(true, authority));
         byte[] first = await session.NextNonceAsync(1);
         Assert.That(Convert.ToHexString(first), Is.EqualTo("112233440102030405060708"));
         for (int i = 1; i < 64; i++)
@@ -148,7 +148,7 @@ internal sealed class AeadNoncePolicyTests
     public async Task ParallelCallsToOneSessionCannotRepeatNonces()
     {
         FakeAllocator authority = new();
-        using AeadNonceSession session = AeadNoncePolicyEngine.Create(Context(true, authority));
+        using AeadNonceSession session = ModelDeterministicSession(Context(true, authority));
         Task<byte[]>[] tasks = Enumerable.Range(0, 512)
             .Select(_ => Task.Run(async () => await session.NextNonceAsync(4))).ToArray();
         byte[][] values = await Task.WhenAll(tasks);
@@ -160,8 +160,8 @@ internal sealed class AeadNoncePolicyTests
     public async Task TwoConcurrentSessionsRequireIndependentAuthorityUniqueness()
     {
         FakeAllocator authority = new();
-        using AeadNonceSession left = AeadNoncePolicyEngine.Create(Context(true, authority));
-        using AeadNonceSession right = AeadNoncePolicyEngine.Create(Context(true, authority));
+        using AeadNonceSession left = ModelDeterministicSession(Context(true, authority));
+        using AeadNonceSession right = ModelDeterministicSession(Context(true, authority));
         Task<byte[]>[] tasks = Enumerable.Range(0, 256)
             .Select(index => Task.Run(async () => await (index % 2 == 0 ? left : right)
                 .NextNonceAsync(1))).ToArray();
@@ -173,7 +173,7 @@ internal sealed class AeadNoncePolicyTests
     public async Task ChangedPrefixIsRejectedBeforeIssuance()
     {
         PrefixChangingAllocator authority = new(Reference);
-        using AeadNonceSession session = AeadNoncePolicyEngine.Create(Context(true, authority));
+        using AeadNonceSession session = ModelDeterministicSession(Context(true, authority));
         for (int i = 0; i < 64; i++)
         {
             await session.NextNonceAsync(0);
@@ -186,7 +186,7 @@ internal sealed class AeadNoncePolicyTests
     public void WrongReservationLengthIsRejected()
     {
         WrongCountAllocator authority = new(Reference);
-        using AeadNonceSession session = AeadNoncePolicyEngine.Create(Context(true, authority));
+        using AeadNonceSession session = ModelDeterministicSession(Context(true, authority));
         Assert.ThrowsAsync<CryptographicException>(async () => { await session.NextNonceAsync(0); });
     }
 
@@ -194,7 +194,7 @@ internal sealed class AeadNoncePolicyTests
     public void CancellationAfterAuthorityCommitPoisonsSession()
     {
         FakeAllocator authority = new(cancelAfterCommit: true);
-        using AeadNonceSession session = AeadNoncePolicyEngine.Create(Context(true, authority));
+        using AeadNonceSession session = ModelDeterministicSession(Context(true, authority));
         Assert.ThrowsAsync<OperationCanceledException>(async () => { await session.NextNonceAsync(0); });
         Assert.ThrowsAsync<CryptographicException>(async () => { await session.NextNonceAsync(0); });
         Assert.That(authority.ReservationCount, Is.EqualTo(1));
@@ -205,13 +205,13 @@ internal sealed class AeadNoncePolicyTests
     {
         FakeAllocator independentAuthority = new();
         byte[] before;
-        using (AeadNonceSession oldProcess = AeadNoncePolicyEngine.Create(Context(true, independentAuthority)))
+        using (AeadNonceSession oldProcess = ModelDeterministicSession(Context(true, independentAuthority)))
         {
             before = await oldProcess.NextNonceAsync(2);
         }
 
         // A restored local key-store snapshot is insufficient to roll back an independent authority.
-        using AeadNonceSession restarted = AeadNoncePolicyEngine.Create(Context(true, independentAuthority));
+        using AeadNonceSession restarted = ModelDeterministicSession(Context(true, independentAuthority));
         byte[] after = await restarted.NextNonceAsync(2);
         Assert.That(BinaryPrimitives.ReadUInt64BigEndian(after.AsSpan(4)),
             Is.EqualTo(BinaryPrimitives.ReadUInt64BigEndian(before.AsSpan(4)) + 64));
@@ -222,7 +222,7 @@ internal sealed class AeadNoncePolicyTests
     public async Task DuplicateRangeViolatesContractAndPoisonsSession()
     {
         RepeatingAllocator bad = new(Reference);
-        using AeadNonceSession session = AeadNoncePolicyEngine.Create(Context(true, bad));
+        using AeadNonceSession session = ModelDeterministicSession(Context(true, bad));
         for (int i = 0; i < 64; i++)
         {
             await session.NextNonceAsync(0);
@@ -236,7 +236,7 @@ internal sealed class AeadNoncePolicyTests
     public void WrongKeyReservationIsRejected()
     {
         FakeAllocator wrong = new(overrideReference: OtherReference);
-        using AeadNonceSession session = AeadNoncePolicyEngine.Create(Context(true, wrong));
+        using AeadNonceSession session = ModelDeterministicSession(Context(true, wrong));
         Assert.ThrowsAsync<CryptographicException>(async () => { await session.NextNonceAsync(0); });
     }
 
@@ -244,7 +244,7 @@ internal sealed class AeadNoncePolicyTests
     public void AmbiguousReservationCommitDoesNotAutomaticallyRetry()
     {
         FakeAllocator authority = new(throwAfterCommit: true);
-        using AeadNonceSession session = AeadNoncePolicyEngine.Create(Context(true, authority));
+        using AeadNonceSession session = ModelDeterministicSession(Context(true, authority));
         Assert.ThrowsAsync<IOException>(async () => { await session.NextNonceAsync(0); });
         Assert.ThrowsAsync<CryptographicException>(async () => { await session.NextNonceAsync(0); });
         Assert.That(authority.ReservationCount, Is.EqualTo(1));
@@ -254,7 +254,7 @@ internal sealed class AeadNoncePolicyTests
     public async Task AuthorityExhaustionCannotWrapCounter()
     {
         FakeAllocator nearEnd = new(first: ulong.MaxValue - 64);
-        using AeadNonceSession session = AeadNoncePolicyEngine.Create(Context(true, nearEnd));
+        using AeadNonceSession session = ModelDeterministicSession(Context(true, nearEnd));
         for (int i = 0; i < 64; i++)
         {
             await session.NextNonceAsync(0);
@@ -267,7 +267,7 @@ internal sealed class AeadNoncePolicyTests
     public async Task RestoreInvalidationBlocksExistingRandomAndDeterministicSessions()
     {
         using AeadNonceSession randomized = AeadNoncePolicyEngine.Create(Context());
-        using AeadNonceSession deterministic = AeadNoncePolicyEngine.Create(Context(true, new FakeAllocator()));
+        using AeadNonceSession deterministic = ModelDeterministicSession(Context(true, new FakeAllocator()));
         Assert.That(await randomized.NextNonceAsync(1), Has.Length.EqualTo(12));
         Assert.That(await deterministic.NextNonceAsync(1), Has.Length.EqualTo(12));
         randomized.InvalidateAfterRestore();
@@ -283,6 +283,47 @@ internal sealed class AeadNoncePolicyTests
         session.Dispose();
         session.Dispose();
         Assert.ThrowsAsync<ObjectDisposedException>(async () => { await session.NextNonceAsync(0); });
+    }
+
+    // Model-only issuance tests do not authorize production selection of this strategy.
+    private static AeadNonceSession ModelDeterministicSession(AeadNoncePolicyContext context) =>
+        new(context.Reference, AeadNonceStrategy.RollbackProtectedDeterministic, context.Allocator, null);
+
+    [Test]
+    public void StoredHistoryAndMissingLifetimeBudgetAreRejected()
+    {
+        Assert.Throws<CryptographicException>(() => AeadNoncePolicyEngine.Create(
+            Context(origin: AeadKeyOrigin.PersistedUnknownNonceHistory)));
+        Assert.Throws<CryptographicException>(() => AeadNoncePolicyEngine.Create(
+            Context() with { RandomizedBudget = null }));
+        Assert.Throws<CryptographicException>(() => AeadNoncePolicyEngine.Create(new(
+            Reference, WellKnownAlgorithms.Aes256Gcm, new(false), null)));
+    }
+
+    [Test]
+    public async Task RandomizedLifetimeBudgetIsSharedAcrossConcurrentSessions()
+    {
+        AeadNoncePolicyEngine.NonceBudget budget = new(
+            AeadNoncePolicyEngine.MaxRandomizedInvocationsPerKeyLifetime - 1);
+        AeadNoncePolicyContext context = Context() with { RandomizedBudget = budget };
+        using AeadNonceSession first = AeadNoncePolicyEngine.Create(context);
+        using AeadNonceSession second = AeadNoncePolicyEngine.Create(context);
+        int accepted = 0;
+        await Task.WhenAll(Enumerable.Range(0, 32).Select(async i =>
+        {
+            try
+            {
+                await (i % 2 == 0 ? first : second).NextNonceAsync(0);
+                Interlocked.Increment(ref accepted);
+            }
+            catch (CryptographicException)
+            {
+                // Exactly one remaining invocation can succeed across both sessions.
+            }
+        }));
+        Assert.That(accepted, Is.EqualTo(1));
+        Assert.ThrowsAsync<CryptographicException>(async () => await first.NextNonceAsync(0));
+        Assert.ThrowsAsync<CryptographicException>(async () => await second.NextNonceAsync(0));
     }
 
     private sealed class FakeAllocator : IRollbackProtectedNonceAllocator

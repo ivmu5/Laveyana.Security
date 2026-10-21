@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using Laveyana.Security.Abstractions.Identifiers;
 using Laveyana.Security.Algorithms;
@@ -12,15 +11,13 @@ namespace Laveyana.Security.Nonce;
 internal static class AeadNoncePolicyEngine
 {
     /// <summary>
-    /// A conservative, per-process per-key randomized nonce budget. Across restarts,
-    /// independent processes and restores, the application must enforce key lifetime limits.
+    /// Maximum randomized invocations over the supported, freshly generated key lifetime.
+    /// A different backend instance cannot resume this lifetime from persisted key material.
     /// </summary>
-    internal const long MaxRandomizedInvocationsPerProcessKey = 1L << 20;
+    internal const long MaxRandomizedInvocationsPerKeyLifetime = 1L << 20;
 
     /// <summary>The maximum managed plaintext length in one future whole-buffer operation.</summary>
     internal const long MaxPlaintextBytes = 64L * 1024 * 1024;
-
-    private static readonly ConcurrentDictionary<KeyReference, NonceBudget> RandomBudgets = new();
 
     /// <summary>Evaluates trusted backend characteristics for one exact key version.</summary>
     internal static AeadNonceStrategy Select(AeadNoncePolicyContext context)
@@ -45,7 +42,7 @@ internal static class AeadNoncePolicyEngine
 
         if (context.ProviderGuarantee != AeadProviderNonceGuarantee.None)
         {
-            if (context.Origin == AeadKeyOrigin.ImportedUnknownNonceHistory &&
+            if (context.Origin != AeadKeyOrigin.FreshlyGenerated &&
                 context.ProviderGuarantee != AeadProviderNonceGuarantee.OwnsNonceLifecycleIncludingImportedHistory)
             {
                 throw new CryptographicException("The provider has not established imported-key nonce safety.");
@@ -58,21 +55,23 @@ internal static class AeadNoncePolicyEngine
         AlgorithmPolicy.EnsureAllowed(context.Algorithm, AlgorithmPurpose.AuthenticatedEncryption,
             AlgorithmUse.NewOperation);
 
-        if (context.Origin == AeadKeyOrigin.ImportedUnknownNonceHistory)
+        if (context.Origin != AeadKeyOrigin.FreshlyGenerated)
         {
-            throw new CryptographicException("Imported AES keys with unknown nonce history cannot be used for managed encryption.");
+            throw new CryptographicException("AES key nonce history is unknown; generate a new key version before forward encryption.");
         }
 
-        // Rollback protection and a separate allocator are BOTH necessary, not individually sufficient.
-        // Do not fall back to a randomized nonce if a supplied allocator is unavailable or fails.
+        // Neither a capability bit nor an allocator interface attests to independent,
+        // key-wide reservation history. No verified deterministic profile is shipped.
+        // Supplying an allocator must never silently fall back to randomized issuance.
         if (context.Allocator is not null)
         {
-            if (!context.StoreCapabilities.ProvidesRollbackProtection)
-            {
-                throw new CryptographicException("Deterministic nonce allocation requires rollback-protected state.");
-            }
+            throw new CryptographicException(
+                "Deterministic AES-GCM nonce allocation is disabled: an independently verified key-wide allocator profile is unavailable.");
+        }
 
-            return AeadNonceStrategy.RollbackProtectedDeterministic;
+        if (context.RandomizedBudget is null)
+        {
+            throw new CryptographicException("A live, fresh-key lifetime budget is required for randomized AES-GCM encryption.");
         }
 
         return AeadNonceStrategy.Randomized;
@@ -82,9 +81,7 @@ internal static class AeadNoncePolicyEngine
     internal static AeadNonceSession Create(AeadNoncePolicyContext context)
     {
         AeadNonceStrategy strategy = Select(context);
-        NonceBudget? budget = strategy == AeadNonceStrategy.Randomized
-            ? RandomBudgets.GetOrAdd(context.Reference, static _ => new NonceBudget())
-            : null;
+        NonceBudget? budget = strategy == AeadNonceStrategy.Randomized ? context.RandomizedBudget : null;
         return new AeadNonceSession(context.Reference, strategy, context.Allocator, budget);
     }
 
@@ -97,14 +94,14 @@ internal static class AeadNoncePolicyEngine
         }
     }
 
-    /// <summary>Atomic per-process counter; a rejected attempt consumes no nonce.</summary>
+    /// <summary>Atomic lifetime counter; it is never reconstructed from persisted metadata.</summary>
     internal sealed class NonceBudget
     {
         private long _issued;
 
         internal NonceBudget(long alreadyIssued = 0)
         {
-            if (alreadyIssued < 0 || alreadyIssued > MaxRandomizedInvocationsPerProcessKey)
+            if (alreadyIssued < 0 || alreadyIssued > MaxRandomizedInvocationsPerKeyLifetime)
             {
                 throw new ArgumentOutOfRangeException(nameof(alreadyIssued));
             }
@@ -117,9 +114,9 @@ internal static class AeadNoncePolicyEngine
             while (true)
             {
                 long current = Interlocked.Read(ref _issued);
-                if (current >= MaxRandomizedInvocationsPerProcessKey)
+                if (current >= MaxRandomizedInvocationsPerKeyLifetime)
                 {
-                    throw new CryptographicException("Per-process AES-GCM randomized nonce budget exhausted; re-key.");
+                    throw new CryptographicException("AES-GCM key lifetime randomized nonce budget exhausted; generate a new key version.");
                 }
 
                 if (Interlocked.CompareExchange(ref _issued, current + 1, current) == current)

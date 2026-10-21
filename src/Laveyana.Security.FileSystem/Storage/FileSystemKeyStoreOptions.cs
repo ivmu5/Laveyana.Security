@@ -9,6 +9,9 @@ namespace Laveyana.Security.FileSystem.Storage;
 /// </remarks>
 public sealed class FileSystemKeyStoreOptions
 {
+    // Per-instance test hook; production behavior never reads process environment variables.
+    internal Action<StoreWriteBoundary, string>? WriteFault { get; init; }
+
     /// <summary>Creates options for a fully qualified, isolated directory.</summary>
     public FileSystemKeyStoreOptions(string rootDirectory)
     {
@@ -37,10 +40,11 @@ public sealed class FileSystemKeyStoreOptions
 
     /// <summary>Optional external checkpoint validation on each read (experimental, read-only).</summary>
     /// <remarks>
-    /// Stage 2B1 only: when provided, requires a pinned ExpectedStoreInstanceId and
+    /// When provided, requires a pinned ExpectedStoreInstanceId and
     /// EnableExperimentalWrites=false. Every load authenticates the exact persisted bytes
     /// and requires a committed authority match with no pending intent. Missing/failed
-    /// authority reads reject access; no fallback or recovery is attempted.
+    /// authority reads or either local rollback journal entry reject access;
+    /// no fallback, cleanup or recovery is attempted.
     /// This is NOT a protected writable profile: the existing ordinary OpenAsync can
     /// still be invoked without this option, so downgrade resistance is not enforced.
     /// Capabilities.ProvidesRollbackProtection remains false. Do not use for real secrets.

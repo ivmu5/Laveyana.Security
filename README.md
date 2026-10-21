@@ -8,6 +8,8 @@
 
 **Historical CI baseline (16 October 2026):** the supplied documentation records successful Windows/Ubuntu Release checks. SA-02 later received scoped closure. **Current consolidated review (21 October 2026): SA-03/SA-04/SA-08 OPEN; Phase 27 NO-GO.** New Linux verification is recorded in the patch's `VERIFICATION_REPORT.ru.md`; this patch has not been executed on Windows or under real power loss. See [security review](docs/audit/Laveyana.Security.Phase27.SecurityAudit.md).
 
+**Adoption decision (21 October 2026):** controlled internal pilots with disposable/non-critical data may start now; production secret custody and experimental filesystem writes remain unapproved. See [known limitations and permitted pilot scope](docs/audit/Laveyana.Security.KnownLimitations.md).
+
 ## Contents
 
 - [Capabilities](#capabilities)
@@ -118,6 +120,7 @@ GitHub Actions runs `Source & docs`, `Build & NUnit (ubuntu-latest)` and `Build 
 | [Decision Log](docs/design/Laveyana.Security.DecisionLog.md) | Approved architectural tradeoffs (historical DXX identifiers retained). |
 | [Roadmap](docs/design/Laveyana.Security.Roadmap.md) | Phase progression and remaining release gates. |
 | [HPKE gate](docs/design/Laveyana.Security.HpkeGate.md) · [Streaming gate](docs/design/Laveyana.Security.StreamingGate.md) | Deferred protocol features and evidence required before exposure. |
+| [Known limitations / pilot use](docs/audit/Laveyana.Security.KnownLimitations.md) | Permitted experimental adoption, open security findings and evidence limits. |
 | [Phase 27 security review](docs/audit/Laveyana.Security.Phase27.SecurityAudit.md) | Static findings, subsequent H01 verification and outstanding security risks. |
 | [H01 verification](docs/hardening/H01-Setup.md) · [Compilation history](docs/hardening/H01-CompilationRepair.md) | Reproducible CI and historical compiler fixes. |
 | [Changelog](CHANGELOG.md) | Development changes and release history (currently unreleased). |

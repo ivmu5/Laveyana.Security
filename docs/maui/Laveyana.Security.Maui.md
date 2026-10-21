@@ -1,0 +1,72 @@
+# Laveyana.Security.Maui — SecureStorage adapter (candidate)
+
+**English** | [Русский](Laveyana.Security.Maui.ru.md)
+
+**Status:** source candidate for review, NOT compiled or platform-tested. No production-security acceptance is implied.
+
+## Purpose and boundaries
+
+`MauiSecureStorageSecretProvider` implements the existing `ISecretManagementProvider` contract using a caller-supplied `Microsoft.Maui.Storage.ISecureStorage` (or MAUI `SecureStorage.Default`). It is intentionally **not** an `IKeyStore` or `IKeyStoreProtector`: platform key-value storage does not guarantee the atomic durable CAS, key-wide nonce discipline, rollback resistance, envelope purpose/authenticated-context binding, cross-process coordination, or crash recovery required by those contracts.
+
+Capabilities:
+
+- Exact stable `ProviderId`/`SecretId` addressing; provider-scoped MAUI storage keys and a versioned record containing its own immutable identity to reject accidental record swaps.
+- `FindAsync`, `GetAsync` (owned `SensitiveMaterialLease`), `SetAsync`, `DeleteAsync` via the existing library interfaces.
+- Maximum raw material of **2048 bytes**. Values are Base64-encoded into `string` for the underlying MAUI API, with strict format and identity validation on reads.
+- Fail-closed errors; no implicit `RemoveAll`, missing-key creation, data migration, value recovery, automatic retry, fallback, or secret enumeration.
+- Explicit DI registration; an `ISecureStorage` fake can be injected in unit tests.
+
+**Not guaranteed:** process isolation between app components, user-level authorization, zeroization of managed `string` copies, transactional/multi-process writes, hardware-backed key custody on every device, cross-device portability, durability after power failure, rollback protection, secure deletion or keys usable as safe persistent AES-GCM encryption roots.
+
+## Wiring in a MAUI application
+
+The MAUI app already provides `SecureStorage.Default`. Register the adapter **before** the existing `AddSecurity` composition. The provider ID and each secret ID must be constants or persistently configured IDs, **never generated at each launch**:
+
+```csharp
+using Laveyana.Security.Abstractions.Identifiers;
+using Laveyana.Security.DependencyInjection.Composition;
+using Laveyana.Security.Maui.Composition;
+using Laveyana.Security.Maui.Storage;
+
+ProviderId providerId = ProviderId.Parse("11111111-1111-4111-8111-111111111111"); // Replace and keep stable.
+builder.Services.AddLaveyanaMauiSecureStorage(providerId);
+builder.Services.AddSecurity(security =>
+    security.UseSecretProvider<MauiSecureStorageSecretProvider>(providerId));
+```
+
+To write or read from your application service:
+
+```csharp
+using Laveyana.Security.Abstractions.Identifiers;
+using Laveyana.Security.Abstractions.Secrets;
+using Laveyana.Security.Abstractions.Sensitive;
+
+SecretReference secret = new(providerId, SecretId.Parse("22222222-2222-4222-8222-222222222222"));
+using SensitiveMaterialLease value = SensitiveMaterialLease.CreateCopy("test-token"u8);
+await provider.SetAsync(secret, value);
+
+using SecretReadResult? result = await provider.GetAsync(secret);
+result?.UseMaterial(bytes =>
+{
+    // Use the borrowed bytes synchronously; do not retain the span or log secrets.
+});
+```
+
+`provider` above is an injected `MauiSecureStorageSecretProvider` or `ISecretManagementProvider`. `SensitiveMaterialLease`, `SecretReference` and `SecretReadResult` belong to `Laveyana.Security.Abstractions` namespaces `Sensitive`, `Identifiers`, and `Secrets` respectively.
+
+`ISecureStorage` has no `CancellationToken` parameter. Cancellation is honored **before** the platform operation, not during it. After an exception near `SetAsync`, the write outcome may be uncertain; inspect the exact key rather than retrying blindly when that matters. Deletes are not guaranteed to securely erase disk blocks or remote synchronized copies.
+
+## Platform notes
+
+- **Android:** MAUI uses encrypted preferences backed by Android key material. Android Auto Backup can restore ciphertext without the corresponding device key; a read may fail or a value may be removed by MAUI. Exclude the SecureStorage preferences from backup or define a recovery/re-authentication policy.
+- **iOS / Mac Catalyst:** Keychain entries can survive app uninstallation; depending on configuration, iCloud Keychain may synchronize. Define application first-launch/user-switch cleanup explicitly; this adapter intentionally does not call `RemoveAll`.
+- **Windows:** MAUI uses DataProtectionProvider. Packaged settings are size-constrained; the 2048-byte raw material bound avoids large-value use. Packaged and unpackaged applications persist differently.
+
+See Microsoft's [SecureStorage platform documentation](https://learn.microsoft.com/en-us/dotnet/maui/platform-integration/storage/secure-storage?view=net-maui-10.0).
+
+## Build and release gate
+
+- Add the module to `Laveyana.Security.sln` and a `Microsoft.Maui.Essentials` version to `Directory.Packages.props`; add tests to `Laveyana.Security.Tests` project references.
+- **New NuGet dependency/lock files require regeneration** from a trusted .NET 10 SDK machine before `--locked-mode` CI will pass. Use the project's existing `scripts/Initialize-LockFiles.ps1` procedure and commit the generated locks. Do not edit locks manually.
+- Run `verify_repository.py`, `verify_api_layout.py`, `verify_documentation.py`, Release build and NUnit; test MAUI Android/iOS/Mac Catalyst/Windows behavior on real supported targets before claiming a validated public package.
+- `IsPackable=false` remains inherited. Public NuGet publishing of this module is deferred until the integration is verified.

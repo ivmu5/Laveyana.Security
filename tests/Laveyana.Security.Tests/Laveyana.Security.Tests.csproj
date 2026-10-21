@@ -20,5 +20,6 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Laveyana.Security.Abstractions/Laveyana.Security.Abstractions.csproj" />
     <ProjectReference Include="../../src/Laveyana.Security/Laveyana.Security.csproj" />
+    <ProjectReference Include="../../src/Laveyana.Security.Maui/Laveyana.Security.Maui.csproj" />
   </ItemGroup>
 </Project>

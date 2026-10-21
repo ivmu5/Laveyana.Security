@@ -27,13 +27,17 @@ public sealed class EcdsaDerSignatureCodecTests
         Assert.Throws<CryptographicException>(() => EcdsaDerSignatureCodec.ToP1363(data));
     }
 
-    private static IEnumerable<byte[]> MalformedDer()
+    private static IEnumerable<TestCaseData> MalformedDer()
     {
-        yield return [];
-        yield return [0x30, 0x00];
-        yield return [0x30, 0x06, 0x02, 0x01, 0xff, 0x02, 0x01, 0x01];
-        yield return [0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0xff];
-        yield return [0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x01, 0x00];
-        yield return [0x30, 0x07, 0x02, 0x02, 0x00, 0x01, 0x02, 0x01, 0x01];
+        yield return new TestCaseData(Array.Empty<byte>()).SetName("RejectsEmptyDer");
+        yield return new TestCaseData(new byte[] { 0x30, 0x00 }).SetName("RejectsEmptySequence");
+        yield return new TestCaseData(new byte[] { 0x30, 0x06, 0x02, 0x01, 0xff, 0x02, 0x01, 0x01 })
+            .SetName("RejectsNegativeFirstInteger");
+        yield return new TestCaseData(new byte[] { 0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0xff })
+            .SetName("RejectsNegativeSecondInteger");
+        yield return new TestCaseData(new byte[] { 0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x01, 0x00 })
+            .SetName("RejectsTrailingData");
+        yield return new TestCaseData(new byte[] { 0x30, 0x07, 0x02, 0x02, 0x00, 0x01, 0x02, 0x01, 0x01 })
+            .SetName("RejectsNonMinimalInteger");
     }
 }

@@ -26,8 +26,6 @@ public sealed class FileSystemKeyStore : IKeyStore, IDisposable
     private const string BootstrapName = "bootstrap.lspb";
     private const string SnapshotName = "store.lsfs";
     private const string LockName = ".store.lock";
-    private const string PendingPrefix = ".pending-";
-    private const string PendingSuffix = ".tmp";
 
     private readonly FileSystemKeyStoreOptions _options;
     private readonly IKeyStoreProtector _protector;
@@ -600,13 +598,12 @@ public sealed class FileSystemKeyStore : IKeyStore, IDisposable
             return;
         }
 
-        // Linux cleanup is unchanged; individual deletions remain descriptor-relative.
-        foreach (string path in Directory.EnumerateFiles(_options.RootDirectory,
-            $"{PendingPrefix}*{PendingSuffix}", SearchOption.TopDirectoryOnly))
+        // Enumerate and remove against the SAME pinned Linux directory.
+        // A renamed/replaced RootDirectory pathname must not redirect cleanup.
+        foreach (string name in _linuxDirectory!.EnumeratePendingNames())
         {
-            string name = Path.GetFileName(path);
             ValidateStoreFile(name);
-            _linuxDirectory!.Remove(name);
+            _linuxDirectory.Remove(name);
         }
     }
 

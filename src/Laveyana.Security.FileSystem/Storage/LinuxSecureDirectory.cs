@@ -225,6 +225,131 @@ internal sealed class LinuxSecureDirectory : IDisposable
         }
     }
 
+    /// <summary>
+    /// Enumerates abandoned temporary names from the pinned directory, not its mutable pathname.
+    /// The caller holds the store lock. This does not delete or trust returned entries.
+    /// </summary>
+    internal IReadOnlyList<string> EnumeratePendingNames()
+    {
+        // The glibc/musl 64-bit dirent ABI places d_reclen at 16 and d_name at 19.
+        // Refuse unknown ABIs instead of silently parsing incorrect native memory.
+        if (IntPtr.Size != 8)
+        {
+            throw new PlatformNotSupportedException("Pinned Linux directory enumeration requires a 64-bit ABI.");
+        }
+
+        bool rootReferenceAdded = false;
+        int duplicate;
+        try
+        {
+            int rootFd = AcquireDirectoryDescriptor(ref rootReferenceAdded);
+            // Use a fresh open-file description so readdir does not change the
+            // root descriptor's directory cursor or depend on its pathname.
+            duplicate = openat(rootFd, ".", OReadOnly | ODirectory | ONoFollow | OCloseOnExec, 0);
+            if (duplicate < 0)
+            {
+                throw NativeError("Opening the pinned directory for enumeration");
+            }
+        }
+        finally
+        {
+            if (rootReferenceAdded)
+            {
+                _directory.DangerousRelease();
+            }
+        }
+
+        nint dir = fdopendir(duplicate);
+        if (dir == nint.Zero)
+        {
+            int error = Marshal.GetLastPInvokeError();
+            close(duplicate);
+            throw new IOException("Opening a pinned directory stream failed.", new Win32Exception(error));
+        }
+
+        bool completed = false;
+        try
+        {
+            List<string> results = new();
+            nint errnoLocation = __errno_location();
+            if (errnoLocation == nint.Zero)
+            {
+                throw new IOException("Cannot obtain Linux directory enumeration error state.");
+            }
+
+            for (;;)
+            {
+                // A null readdir return can mean end-of-directory OR error.
+                Marshal.WriteInt32(errnoLocation, 0);
+                nint entry = readdir(dir);
+                if (entry == nint.Zero)
+                {
+                    int error = Marshal.ReadInt32(errnoLocation);
+                    if (error != 0)
+                    {
+                        throw new IOException("Enumerating the pinned directory failed.",
+                            new Win32Exception(error));
+                    }
+
+                    break;
+                }
+
+                const int nameOffset = 19;
+                int recordLength = unchecked((ushort)Marshal.ReadInt16(entry, 16));
+                int nameCapacity = recordLength - nameOffset;
+                if (nameCapacity is < 1 or > 256)
+                {
+                    throw new IOException("Linux directory enumeration returned an invalid record length.");
+                }
+
+                int nameLength = 0;
+                bool ascii = true;
+                while (nameLength < nameCapacity && Marshal.ReadByte(entry, nameOffset + nameLength) != 0)
+                {
+                    if (Marshal.ReadByte(entry, nameOffset + nameLength) > 0x7F)
+                    {
+                        ascii = false;
+                    }
+
+                    nameLength++;
+                }
+
+                if (nameLength == nameCapacity)
+                {
+                    throw new IOException("Linux directory enumeration returned an unterminated filename.");
+                }
+
+                if (!ascii || nameLength == 0)
+                {
+                    continue;
+                }
+
+                byte[] nameBytes = new byte[nameLength];
+                Marshal.Copy(IntPtr.Add(entry, nameOffset), nameBytes, 0, nameLength);
+                string name = System.Text.Encoding.ASCII.GetString(nameBytes);
+                if (name.StartsWith(".pending-", StringComparison.Ordinal) &&
+                    name.EndsWith(".tmp", StringComparison.Ordinal))
+                {
+                    results.Add(name);
+                }
+            }
+
+            results.Sort(StringComparer.Ordinal);
+            completed = true;
+            return results;
+        }
+        finally
+        {
+            // fdopendir owns the duplicate descriptor after success.
+            // Never retry close after EINTR: its outcome may be ambiguous.
+            int result = closedir(dir);
+            if (result != 0 && completed)
+            {
+                throw NativeError("Closing the pinned directory stream");
+            }
+        }
+    }
+
     internal void Remove(string name)
     {
         ValidateName(name);
@@ -419,6 +544,18 @@ internal sealed class LinuxSecureDirectory : IDisposable
 
     [DllImport("libc", EntryPoint = "flock", SetLastError = true)]
     private static extern int flock(int fd, int operation);
+
+    [DllImport("libc", EntryPoint = "fdopendir", SetLastError = true)]
+    private static extern nint fdopendir(int fd);
+
+    [DllImport("libc", EntryPoint = "readdir", SetLastError = true)]
+    private static extern nint readdir(nint directory);
+
+    [DllImport("libc", EntryPoint = "closedir", SetLastError = true)]
+    private static extern int closedir(nint directory);
+
+    [DllImport("libc", EntryPoint = "__errno_location")]
+    private static extern nint __errno_location();
 
     [DllImport("libc", EntryPoint = "fsync", SetLastError = true)]
     private static extern int fsync(int fd);

@@ -43,7 +43,12 @@ internal sealed class StoreProcessWorkerTests
         {
             if (name == target && point == stop)
             {
-                File.WriteAllText(signal, Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                // Publish the PID only after closing the writer handle. On Windows,
+                // observing File.Exists while WriteAllText is still writing can race
+                // with the exclusive file share and fail the parent read.
+                string pending = signal + ".pending";
+                File.WriteAllText(pending, Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                File.Move(pending, signal);
                 // The parent kills this exact writer while its real store lock is held.
                 using ManualResetEventSlim never = new(false);
                 never.Wait();

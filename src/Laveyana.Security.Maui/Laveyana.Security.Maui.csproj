@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Maui.Essentials" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <ProjectReference Include="../Laveyana.Security.Abstractions/Laveyana.Security.Abstractions.csproj" />
+  </ItemGroup>
+</Project>

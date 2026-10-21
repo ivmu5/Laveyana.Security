@@ -87,6 +87,7 @@ REQUIRED_PLATFORM = {
         "FileSystemKeyStoreTests.WindowsKilledExternalPendingWriterCannotAlterCommittedSnapshot",
     ),
     "Linux": (
+        "FileSystemKeyStoreTests.LinuxPendingCleanupEnumeratesThePinnedRootAfterPathReplacement",
         "FileSystemKeyStoreTests.LinuxPublicationReportsDirectoryBarrierOnlyAfterRename",
         "FileSystemKeyStoreTests.LinuxDirectoryBarrierFailureIsUncertainAfterVisibleRename",
         "FileSystemKeyStoreTests.InsecureRootPermissionsAreRejectedWithoutRepair",

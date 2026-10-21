@@ -1,0 +1,32 @@
+<Application x:Class="Laveyana.Security.App.LibraryWorkbench.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             StartupUri="MainWindow.xaml">
+    <Application.Resources>
+        <ResourceDictionary>
+            <!-- Initial dark palette. ApplyTheme replaces these entries at runtime. -->
+            <SolidColorBrush x:Key="PageBrush" Color="#101722" />
+            <SolidColorBrush x:Key="PanelBrush" Color="#192536" />
+            <SolidColorBrush x:Key="CardBrush" Color="#223146" />
+            <SolidColorBrush x:Key="InputBrush" Color="#121E2D" />
+            <SolidColorBrush x:Key="TextBrush" Color="#EDF4FC" />
+            <SolidColorBrush x:Key="MutedBrush" Color="#A3B6CC" />
+            <SolidColorBrush x:Key="AccentBrush" Color="#59C3B5" />
+            <SolidColorBrush x:Key="AccentTextBrush" Color="#09261F" />
+            <SolidColorBrush x:Key="AccentHoverBrush" Color="#7ADBCF" />
+            <SolidColorBrush x:Key="AccentPressedBrush" Color="#41A99D" />
+            <SolidColorBrush x:Key="BorderBrush" Color="#34485F" />
+            <SolidColorBrush x:Key="HoverBorderBrush" Color="#6587A1" />
+            <SolidColorBrush x:Key="HoverBrush" Color="#30445E" />
+            <SolidColorBrush x:Key="SelectedBrush" Color="#274957" />
+            <SolidColorBrush x:Key="DisabledBrush" Color="#1A2533" />
+            <SolidColorBrush x:Key="DisabledTextBrush" Color="#6F8296" />
+            <SolidColorBrush x:Key="ReadOnlyBrush" Color="#1D2B3C" />
+            <SolidColorBrush x:Key="ScrollTrackBrush" Color="#192536" />
+            <SolidColorBrush x:Key="ScrollThumbBrush" Color="#4E657D" />
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Themes/Controls.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

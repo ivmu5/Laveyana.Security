@@ -370,3 +370,56 @@
 ### Контрольная точка SA-03 — контракт независимого authority (20 октября 2026 года)
 
 Добавлен `Laveyana.Security.Abstractions.Rollback` (неизменяемые контрольные точки всего хранилища, модель confirmed/pending, необязательный CAS-контракт внешнего authority, запрет чтения при несоответствии), а также NUnit-тесты контракта. Подробнее: [контракт SA-03](../design/Laveyana.Security.RollbackAuthorityContract.ru.md). На этом этапе нет интеграции с FileSystemKeyStore, реального долговечного независимого authority, протокола восстановления или платформенных security-тестов; `ProvidesRollbackProtection` не изменён. **SA-03 ОТКРЫТА, SA-04 ОТКРЫТА, Phase 27 NO-GO, FileSystem EXPERIMENTAL / TEST ONLY.** Сборка/тесты этой конкретной версии в среде упаковки не подтверждены.
+
+## Сводный security self-review — 21 октября 2026 года
+
+**Текущий статус: ограниченное закрытие SA-02 сохранено; SA-03 / SA-04 / SA-08 OPEN; Phase 27 NO-GO; FileSystem EXPERIMENTAL / TEST ONLY.** Дополнение заменяет прежние сводки текущего статуса, сохраняя их исторические результаты. База — приложенный экспорт, не Git checkout. Точные хеши и выполненные команды находятся в `VERIFICATION_REPORT.ru.md` комплекта. Self-review не заменяет независимый аудит.
+
+### Реализованные ограничения и цена
+
+- Сохранённый software AES-ключ ранее по умолчанию передавался policy как `FreshlyGenerated`. Процессный словарь мог заново открыть бюджет без знания полной истории ключа. Теперь backend регистрирует только самостоятельно созданный материал, связывает бюджет с точной идентичностью и приватным fingerprint материала и не регистрирует сохранённые/импортированные ключи при чтении. Все шифрования используют общий атомарный бюджет срока жизни. Другой backend обязан явно выполнить ротацию перед новым шифрованием; историческое расшифрование доступно. Автоматическая ротация не скрывает изменение поведения.
+- Максимум `q = 2^20` randomized nonce за поддерживаемый срок жизни свежего материала. При независимых равномерных 96-битных результатах CSPRNG вероятность коллизии не более `q(q-1)/2^97 < 2^-57`. Это вероятностная оценка nonce, не строгая уникальность и не полный анализ вероятности подделки GCM. Реальный software лимит сообщения остаётся 16 MiB. Использование того же материала извне, компрометация RNG, восстановление/клонирование живой памяти и подмена доверенного кода вне профиля. Коллизии самих случайных ключей тоже вероятностные.
+- Ранее capability flag + `IRollbackProtectedNonceAllocator` включали deterministic issuance без отдельно подтверждённого профиля доверия; новая сессия шифрования также не устанавливает историю резервирования других сессий. Policy теперь запрещает такой выбор. Механизм диапазонов сохранён только для модельных тестов; default reservation, overlap, exhaustion и ambiguous/canceled commit не становятся production-гарантией nonce.
+- Snapshot/bootstrap и журнал используют единый внутренний путь публикации точных байтов. Исходные сигнатуры native Move и проверки закреплённых handles сохранены для регрессий SA-02. После начала публикации исключение/cancellation означает неопределённость; вторичная ошибка cleanup не заменяет исходную. Это консервативно даже тогда, когда конкретный нативный отказ фактически не изменил файл.
+- Authority inspection блокирует candidate ИЛИ intent до RPC — при открытии и каждой последующей загрузке. Старый committed state не разрешает запоздалый staged request. Read-only отказ сохраняет содержимое и записи файлов. Обычный v1 по-прежнему явно не защищён; marker не выдаётся за защиту legacy/pre-enrollment rollback.
+
+### Физические предпосылки и платформенные границы
+
+| Слой | Что реализовано / предполагается | Что не доказано или заблокировано |
+| --- | --- | --- |
+| Данные файла | Эксклюзивный закреплённый temporary; полная запись; `Flush(true)`; точное ограниченное перечитывание | Устройство/контроллер должны честно исполнять flush и сообщать ошибки; reread может идти из кэша |
+| Linux namespace | `renameat` / no-replace `renameat2`, затем `fsync` того же удерживаемого parent fd | Квалификация конкретных local FS, kernel, mount, host storage и failure model; здесь контейнерный overlayfs |
+| Windows NTFS namespace | Нативный handle-relative `NtSetInformationFile`; проверка destination | Независимо обоснованный namespace persistence barrier отсутствует; наличие файла не доказывает power-loss durability |
+| Создание root/bootstrap | Две отдельные обычные публикации; неполный bootstrap отклоняется | Создание root не синхронизирует все изменения ancestor namespace; initial provisioning не квалифицирован |
+| Cleanup | Относительное удаление temporary; rollback-журнал автоматически не удаляется | Linux `Remove` не fsync-ит удаление; постоянство cleanup не может определять результат восстановления |
+| VM / железо | Виртуальные диски и контроллеры не квалифицированы | Передача guest flush, host caching, volatile cache/PLP, восстановление FS, network/FUSE/overlay semantics |
+
+**Защищённые записи запрещены на обеих платформах до любой мутации authority.** Реальный authority, enrollment профиля и recovery executor не поставляются. Обычные экспериментальные записи доступны. Linux fsync — нужный примитив, но не сертификация контейнерного storage stack. Windows file flush не обобщается до доказательства нативного rename. Источники: [Linux fsync(2)](https://man7.org/linux/man-pages/man2/fsync.2.html), [Microsoft FlushFileBuffers](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers), [NIST SP 800-38D, разделы 8.2–8.3](https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf). Формула вероятности выше — birthday-bound расчёт для выбранного лимита.
+
+### Матрица угроз / приёмки
+
+| Сценарий | Исполняемое поведение / регрессия | Оставшееся условие |
+| --- | --- | --- |
+| Корректный старый полный snapshot, чужой UUID или pending checkpoint | Exact-byte authority gate отклоняет; журнал блокирует даже совпадающий старый committed | Обычный/legacy v1 может не передать authority; защищённого профиля нет |
+| Потеря ответа / late prepare, enroll, finalize / replay | Исходные request ID и terminal fences в моделях; копия при рестарте сохраняет решения; старая модельная БД за абстрактным независимым anchor отказывает, включая re-enroll | Настоящие transport identity, долговечные решения/fences, failover/restore и независимость провайдера не проверены |
+| Сбой temporary/write/flush/rename | Fault callbacks и настоящее завершение дочернего writer; reopen принимает authenticated old/new, не частичный файл | Kill процесса не power cut; интегрированной удалённой транзакции нет |
+| Candidate есть, intent отсутствует/повреждён/неполон | Authenticated journal reader отклоняет; опубликованные свидетельства сохраняются; child kill охватывает candidate/intent | Нет автоматического continuation и постоянного cleanup protocol |
+| Cancellation после возможной публикации | Неопределённый I/O результат; software commit не повторяется автоматически | Нужно согласовать точное состояние; transactional cancellation не обещается |
+| Конкурирующие сотрудничающие процессы | Одно имя получает один победитель под тем же native lock; snapshot аутентичен | Враждебный код той же identity и произвольный контроль root/ACL вне cooperative confinement |
+| Stored/imported AES / новый backend / независимый процесс | Новое шифрование запрещено; decrypt доступен; явная свежая ротация возвращает ограниченное шифрование | Нет cross-restart forward lifetime без независимо проверенного provider |
+| Ложная capability allocator / повторный или исчерпанный диапазон | Production deterministic selection запрещён; отдельные модели сохраняют bounds и блокируют uncertainty | История key-wide reservations, aliases материала, memory/VM restore требуют внешнего решения |
+
+### Приоритеты независимой проверки
+
+1. Проверить, что ordinary API, migration, flags и старый формат нигде не называются защищённым профилем; до включения writer разобрать pre-enrollment backups, доверие к коду/конфигурации и identity authority.
+2. Проверить происхождение свежего материала против authenticated substitution, rollback/version reuse, конкурентной генерации, failed/ambiguous commits, пересоздания backend, ротации и внешних aliases. Приложению с live memory snapshots нужен другой provider/profile.
+3. Выполнить каждую crash boundary на Windows и выбранной Linux FS; сверить исходные TRX, обязательные регрессии и платформенные skips. Перепроверить сохранённые SA-02 handle lifetimes и исключения cleanup.
+4. Проверить restart/failover/old backup authority, immutable arguments, durable negative fences, late delivery и ABA. Volatile fake не является production-кандидатом.
+
+### Воспроизводимый план abrupt VM-stop — NOT RUN
+
+Только отдельная тестовая VM и тестовый volume: worker использует публичный синтетический ключ. Сначала собрать Release. В guest задать `LAVEYANA_TEST_WORKER_ROOT` — изолированный абсолютный persistent каталог хранилища; `LAVEYANA_TEST_WORKER_SIGNAL` — соседний ready-файл; `LAVEYANA_TEST_WORKER_PROVIDER=11111111-1111-4111-8111-111111111111`. Выбрать `LAVEYANA_TEST_WORKER_MODE=init` и выполнить `dotnet vstest tests/Laveyana.Security.IntegrationTests/bin/Release/net10.0/Laveyana.Security.IntegrationTests.dll /TestCaseFilter:FullyQualifiedName~StoreProcessWorkerTests.RunWorker`.
+
+Удалить ready-файл. Выбрать mode `kill` и `LAVEYANA_TEST_WORKER_BOUNDARY`: `TemporaryCreated`, `DataWritten`, `FileFlushed`, `BeforeRename`, `AfterRename`, `DirectoryFlushed` (только Linux), `Published`; запустить ту же команду. Worker пишет PID в ready и ждёт, удерживая реальный store lock. После наблюдения ready **с хоста гипервизора** резко выключить только тестовую VM: libvirt — `virsh destroy LaveyanaPowerCut`, Hyper-V — `Stop-VM -Name LaveyanaPowerCut -TurnOff`. Guest shutdown, save/suspend и штатный reboot не заменяют опыт. Здесь эти команды НЕ выполнялись.
+
+Запустить VM, до любых записей скопировать/посчитать хеши всех файлов, выбрать mode `inspect` и повторить worker. Он открывает read-only и сообщает authenticated old/candidate либо отказывает при invalid/incomplete state. Ошибка не разрешает reset/enroll. Записать SDK/OS, kernel/NTFS, volume/mount options, VM storage/cache policy, host/controller/drive/PLP, хеши и размеры bootstrap/active/candidate/intent/temps, boundary и факт отказа. Повторять с чистого тестового store по всем границам, с конкурентными writer, disk-full/I/O failures. Квалификация power-cut журнала и remote prepare/finalize дополнительно требует будущего защищённого протокола и не выводится из этого обычного writer harness. Hard-stop VM не проверяет реальное обесточивание хоста/контроллера. Все физические/VM опыты и новый Windows-прогон здесь — **NOT RUN / UNVERIFIED**.

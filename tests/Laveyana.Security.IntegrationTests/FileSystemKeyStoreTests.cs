@@ -1200,11 +1200,15 @@ public sealed partial class FileSystemKeyStoreTests
             KeyStoreProtectionContext.ForKeyMaterial(new KeyReference(_provider, key, new KeyVersion(version))));
     }
 
-    private sealed class TestProtector : IKeyStoreProtector
+    internal sealed class TestProtector : IKeyStoreProtector
     {
-        private readonly byte[] _secret = RandomNumberGenerator.GetBytes(32);
+        private readonly byte[] _secret;
 
-        public TestProtector(int generation = 1) => CurrentReference = new("integration-test", generation);
+        public TestProtector(int generation = 1, byte[]? secret = null)
+        {
+            _secret = secret is null ? RandomNumberGenerator.GetBytes(32) : (byte[])secret.Clone();
+            CurrentReference = new("integration-test", generation);
+        }
 
         public ProtectorReference CurrentReference { get; }
 

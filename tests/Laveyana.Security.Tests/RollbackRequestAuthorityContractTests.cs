@@ -212,6 +212,48 @@ internal sealed class RollbackRequestAuthorityContractTests
         Assert.That(await fake.ReadAsync(Store), Is.Null);
     }
 
+    [Test]
+    public async Task SimulatedRestartPreservesAppliedDecisionsAndFences()
+    {
+        VolatileRequestAuthority authority = new();
+        RollbackCheckpoint first = Checkpoint(1, "restart-first");
+        RollbackCheckpoint second = Checkpoint(2, "restart-second");
+        RollbackRequestId enroll = Request();
+        RollbackRequestId prepare = Request();
+        RollbackRequestId delayed = Request();
+        Assert.That(await authority.TryEnrollAsync(enroll, first), Is.True);
+        Assert.That(await authority.TryPrepareAsync(prepare, first, second), Is.True);
+        Assert.That(await authority.ResolveAsync(Store, delayed), Is.EqualTo(RollbackRequestResolution.NotApplied));
+
+        // Copy the fake's complete conceptual database, including decision tombstones.
+        // This is a logical restart simulation, not disk or provider durability evidence.
+        VolatileRequestAuthority restarted = authority.CopyForRestart();
+        Assert.That(await restarted.ResolveAsync(Store, enroll), Is.EqualTo(RollbackRequestResolution.Applied));
+        Assert.That(await restarted.ResolveAsync(Store, prepare), Is.EqualTo(RollbackRequestResolution.Applied));
+        Assert.That(await restarted.TryPrepareAsync(prepare, first, second), Is.True);
+        Assert.That(await restarted.TryFinalizeAsync(delayed, first, second), Is.False);
+        Assert.That((await restarted.ReadAsync(Store))!.Pending!.Matches(second), Is.True);
+        Assert.That(await restarted.TryFinalizeAsync(Request(), first, second), Is.True);
+        Assert.That(await restarted.CopyForRestart().ResolveAsync(Store, prepare), Is.EqualTo(RollbackRequestResolution.Applied));
+    }
+
+    [Test]
+    public async Task SimulatedOldAuthorityDatabaseCannotServeOrReenrollBehindIndependentAnchor()
+    {
+        VolatileRequestAuthority authority = new();
+        RollbackCheckpoint first = Checkpoint(1, "backup-first");
+        RollbackCheckpoint second = Checkpoint(2, "backup-second");
+        await authority.TryEnrollAsync(Request(), first);
+        VolatileRequestAuthority oldBackup = authority.CopyForRestart();
+        await authority.TryPrepareAsync(Request(), first, second);
+        await authority.TryFinalizeAsync(Request(), first, second);
+        VolatileRequestAuthority restored = authority.RestoreOldDatabaseForTest(oldBackup);
+        Assert.ThrowsAsync<IOException>(async () => await restored.ReadAsync(Store));
+        Assert.ThrowsAsync<IOException>(async () => await restored.ResolveAsync(Store, Request()));
+        Assert.ThrowsAsync<IOException>(async () => await restored.TryEnrollAsync(Request(), first));
+        Assert.ThrowsAsync<IOException>(async () => await restored.TryPrepareAsync(Request(), first, second));
+    }
+
     private sealed class VolatileRequestAuthority : IKeyStoreRollbackRequestAuthority
     {
         private readonly object _sync = new();
@@ -219,6 +261,45 @@ internal sealed class RollbackRequestAuthorityContractTests
         private readonly Dictionary<Guid, RequestRecord> _requests = new();
 
         public bool CanFenceUnknown { get; init; } = true;
+        private int _independentlyAnchoredRequestCount;
+
+        internal VolatileRequestAuthority CopyForRestart()
+        {
+            lock (_sync)
+            {
+                RequireModelAnchor();
+                VolatileRequestAuthority copy = new() { CanFenceUnknown = CanFenceUnknown };
+                foreach (var pair in _stores)
+                {
+                    copy._stores.Add(pair.Key, pair.Value);
+                }
+
+                foreach (var pair in _requests)
+                {
+                    copy._requests.Add(pair.Key, pair.Value);
+                }
+
+                copy._independentlyAnchoredRequestCount = _independentlyAnchoredRequestCount;
+                return copy;
+            }
+        }
+
+        internal VolatileRequestAuthority RestoreOldDatabaseForTest(VolatileRequestAuthority backup)
+        {
+            VolatileRequestAuthority restored = backup.CopyForRestart();
+            // Model an anchor OUTSIDE the rolled-back database; never claim this
+            // in-memory count establishes such an anchor for a real authority.
+            restored._independentlyAnchoredRequestCount = _independentlyAnchoredRequestCount;
+            return restored;
+        }
+
+        private void RequireModelAnchor()
+        {
+            if (_requests.Count != _independentlyAnchoredRequestCount)
+            {
+                throw new IOException("Simulated authority database rollback: independent anchor mismatch.");
+            }
+        }
 
         public ValueTask<RollbackAuthorityState?> ReadAsync(Guid storeInstanceId,
             CancellationToken cancellationToken = default)
@@ -226,6 +307,7 @@ internal sealed class RollbackRequestAuthorityContractTests
             cancellationToken.ThrowIfCancellationRequested();
             lock (_sync)
             {
+                RequireModelAnchor();
                 return ValueTask.FromResult(_stores.GetValueOrDefault(storeInstanceId));
             }
         }
@@ -291,6 +373,7 @@ internal sealed class RollbackRequestAuthorityContractTests
 
             lock (_sync)
             {
+                RequireModelAnchor();
                 if (_requests.TryGetValue(requestId.Value, out RequestRecord? found))
                 {
                     if (found.StoreInstanceId != storeInstanceId)
@@ -309,6 +392,7 @@ internal sealed class RollbackRequestAuthorityContractTests
                 // This is in-memory ONLY. A real provider MUST persist this tombstone durably.
                 _requests[requestId.Value] = new RequestRecord(storeInstanceId, "fenced", null,
                     null, RollbackRequestResolution.NotApplied);
+                _independentlyAnchoredRequestCount = _requests.Count;
                 return ValueTask.FromResult(RollbackRequestResolution.NotApplied);
             }
         }
@@ -322,6 +406,7 @@ internal sealed class RollbackRequestAuthorityContractTests
             ArgumentNullException.ThrowIfNull(next);
             lock (_sync)
             {
+                RequireModelAnchor();
                 if (_requests.TryGetValue(requestId.Value, out RequestRecord? recorded))
                 {
                     if (recorded.StoreInstanceId != next.StoreInstanceId)
@@ -347,6 +432,7 @@ internal sealed class RollbackRequestAuthorityContractTests
                 _requests.Add(requestId.Value, new RequestRecord(next.StoreInstanceId, kind,
                     expected, next, result ? RollbackRequestResolution.Applied :
                         RollbackRequestResolution.NotApplied));
+                _independentlyAnchoredRequestCount = _requests.Count;
                 return ValueTask.FromResult(result);
             }
         }

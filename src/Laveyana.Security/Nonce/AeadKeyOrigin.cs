@@ -9,4 +9,5 @@ internal enum AeadKeyOrigin
 {
     FreshlyGenerated = 0,
     ImportedUnknownNonceHistory = 1,
+    PersistedUnknownNonceHistory = 2,
 }

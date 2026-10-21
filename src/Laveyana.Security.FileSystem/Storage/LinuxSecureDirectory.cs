@@ -180,7 +180,11 @@ internal sealed class LinuxSecureDirectory : IDisposable
         return AsStream(descriptor, FileAccess.ReadWrite);
     }
 
-    internal void Move(string temporaryName, string destinationName, bool overwrite)
+    internal void Move(string temporaryName, string destinationName, bool overwrite) =>
+        MoveWithFault(temporaryName, destinationName, overwrite, null);
+
+    internal void MoveWithFault(string temporaryName, string destinationName, bool overwrite,
+        Action<StoreWriteBoundary, string>? fault)
     {
         ValidateName(temporaryName);
         ValidateName(destinationName);
@@ -203,11 +207,14 @@ internal sealed class LinuxSecureDirectory : IDisposable
                 throw NativeError("Replacing store snapshot");
             }
 
+            fault?.Invoke(StoreWriteBoundary.AfterRename, destinationName);
             // Post-rename failure is an uncertain commit; callers must reconcile.
             if (fsync(rootFd) != 0)
             {
                 throw NativeError("Synchronizing store directory");
             }
+
+            fault?.Invoke(StoreWriteBoundary.DirectoryFlushed, destinationName);
         }
         finally
         {

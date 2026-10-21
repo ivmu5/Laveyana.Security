@@ -263,9 +263,10 @@ internal sealed class SoftwareAeadEncryptionTests
         }
         StorageContractsTests.MemoryStore store = new();
         using SoftwareKeyProviderTests.TestProtector protector = new();
-        (SoftwareKeyProviderBackend setup, LogicalKeyHandle handle) = await CreateAsync(store, protector);
         RejectAllocator allocator = new();
         SoftwareKeyProviderBackend usingAllocator = new(Provider, store, protector, allocator);
+        KeyDescriptor descriptor = await usingAllocator.CreateAsync(Name, WellKnownAlgorithms.Aes256Gcm, Both);
+        LogicalKeyHandle handle = new(Provider, descriptor.KeyId);
         Assert.ThrowsAsync<CryptographicException>(async () => await usingAllocator.EncryptAsync(handle, new byte[] { 1 }));
         Assert.That(allocator.WasCalled, Is.False);
     }
@@ -297,9 +298,9 @@ internal sealed class SoftwareAeadEncryptionTests
         }
         StorageContractsTests.MemoryStore store = new();
         using SoftwareKeyProviderTests.TestProtector protector = new();
-        (SoftwareKeyProviderBackend authoritative, LogicalKeyHandle handle) = await CreateAsync(store, protector);
         PausedLookupStore pausedStore = new(store);
-        SoftwareKeyProviderBackend pendingBackend = new(Provider, pausedStore, protector);
+        (SoftwareKeyProviderBackend pendingBackend, LogicalKeyHandle handle) = await CreateAsync(pausedStore, protector);
+        SoftwareKeyProviderBackend authoritative = new(Provider, store, protector);
         byte[] expectedAad = "original-encrypt-aad"u8.ToArray();
         byte[] callerOwnedAad = (byte[])expectedAad.Clone();
         byte[] plaintext = [9, 8, 7];

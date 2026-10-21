@@ -1,8 +1,8 @@
-# SA-03 — Rollback authority contracts (stages 1 and 2A, 20 October 2026)
+# SA-03 — rollback authority contract and integration limits
 
 **English** | [Русский](Laveyana.Security.RollbackAuthorityContract.ru.md)
 
-**Status: CONTRACTS + UNIT FIXTURES ONLY (Stage 2A request resolution; no FileSystem integration). SA-03 OPEN. Phase 27 NO-GO. FileSystemKeyStore EXPERIMENTAL / TEST ONLY.**
+**Current status (21 October 2026): read-only inspection, local staging and diagnostic recovery foundations only; protected writes and automatic recovery DISABLED. SA-03 OPEN; Phase 27 NO-GO; FileSystem EXPERIMENTAL / TEST ONLY. Historical stage sections below describe their own checkpoints.**
 
 ## Threat and boundary
 
@@ -93,7 +93,7 @@ Run on a machine with .NET SDK 10:
  dotnet test tests/Laveyana.Security.Tests/Laveyana.Security.Tests.csproj -c Release --locked-mode --filter "FullyQualifiedName~RollbackAuthorityContractTests|FullyQualifiedName~RollbackRequestAuthorityContractTests"
 ```
 
-**This patch has not been compiled or run in the packaging environment.** Require Windows/Linux CI evidence on the exact revision, plus independent provider/recovery implementation and adversarial reviews, before considering SA-03 closed.
+**Historical stage verification note:** this stage was not compiled or run at its original packaging checkpoint. The consolidated patch has separate verification evidence. Require Windows/Linux CI evidence on the exact revision, plus independent provider/recovery implementation and adversarial reviews, before considering SA-03 closed.
 
 ### Stage 2B1: read-only file inspection (experimental)
 
@@ -141,3 +141,56 @@ required. There is no protected write path, authority RPC or public API change.
 Eight cross-platform integration tests cover normal combinations, adversarial mismatches
 and authenticated journal inspection without file mutation. Three are mandatory TRX gate
 regressions. `ProvidesRollbackProtection=false`; SA-03/SA-04/SA-08 OPEN; Phase 27 NO-GO.
+
+
+### Stage 2B4: power-loss durability review and activation gate (design checkpoint; no code changes)
+
+**Result:** Protected writes are still DISABLED on Windows and Linux. `FileSystemKeyStore` does not contact a rollback authority for mutations; `ProvidesRollbackProtection=false`. Stage 2B4 records the exact durability evidence required before enabling `prepare`. No new public API, provider, or backend is introduced.
+
+**What the source actually establishes:**
+
+- `RollbackCandidateJournal.WriteNewAsync` creates an exclusive temporary file under the pinned root, writes exact bytes, calls `FileStream.Flush(true)`, rereads and byte-compares the temporary file, then uses `LinuxSecureDirectory.Move` or `WindowsSecureDirectory.Move` to publish the candidate/intent name.
+- Linux `Move` uses `renameat`/`renameat2` relative to the pinned directory and calls `fsync(rootFd)` after a successful rename. If `fsync` fails, the operation has an **unknown post-rename outcome**, not permission to issue `prepare`. The directory barrier is the right primitive but production guarantees still depend on the filesystem, mount, kernel, device and failure model.
+- Windows `Move` performs handle-relative native `NtSetInformationFile(FileRenameInformation)` and checks the destination exists. Neither that existence check nor flushing the source file proves persistence of the *directory entry* after abrupt power loss. No verified equivalent to Linux's parent-directory durability barrier is currently part of this implementation.
+- Linux `Remove` currently calls `unlinkat` without a following `fsync` on the directory. Before any recovery procedure relies on permanent journal deletion, this must be addressed; an old staging name could reappear after power loss. Never infer a completed recovery from successful deletion alone.
+- There is **no** production-grade claim for either platform. `Kill`/exception/restart tests verify logic, not persistence after abrupt loss of power.
+
+**Authoritative platform references:** Linux `fsync(2)` explicitly requires `fsync` of the containing directory for name persistence: https://man7.org/linux/man-pages/man2/fsync.2.html . Windows `FlushFileBuffers` documents flushing file data, not a directory-rename persistence guarantee: https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers . `MOVEFILE_WRITE_THROUGH` documents a guarantee for moves implemented as copy-and-delete; it must **not** be substituted for the existing handle-relative native rename or assumed sufficient for all same-volume NTFS renames: https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefileexw . Any Windows alternative must preserve SA-02's pinned-handle/no-reparse security model.
+
+**Required write protocol gate (not implemented):** Before any authority `prepare` request, the exact candidate bytes and authenticated intent, including stable request IDs, must be committed to the supported local filesystem *with verified data and namespace persistence barriers*. The same applies to publication of the active snapshot before `finalize`. A post-rename I/O/barrier error is ambiguous and must fail closed, preserving recovery material. Never auto-enroll, silently restage as a new request, delete evidence or treat an authority timeout as rejection. Recovery additionally requires a fresh linearizable authority observation and a terminal fenced resolution of any ambiguous request.
+
+**Failure-injection acceptance matrix:**
+
+| Cut point | Required evidence / allowed behavior |
+| --- | --- |
+| During temporary candidate write, before file flush | No remote mutation; reject/retain partial local state, never serve it as committed. |
+| After candidate file flush, before candidate name publication | No remote mutation; stale temporary entry is not accepted as a committed candidate. |
+| During/after candidate name publication, before its namespace barrier | Ambiguous local outcome; do not contact authority. |
+| After candidate but before authenticated intent is durable | No `prepare`; reject/retain incomplete pair. |
+| After both candidate and intent durable, before `prepare` | Exact candidate and stable request IDs survive restart; delayed RPC remains unresolved until fenced. |
+| Lost/delayed `prepare` reply | No inference from absence in a single read; resolve original ID with a durable fence or fail closed. |
+| After prepared authority state, before/during active-snapshot publication | Retain exact candidate; ordinary reads blocked; recovery only if durability evidence and authority protocol allow it. |
+| After active-snapshot publication, before `finalize` | Reconcile exact bytes, pinned UUID, pending checkpoint and original request ID; never announce success prematurely. |
+| Lost `finalize` reply or crash during journal cleanup | Verify terminal authority decision and exact active bytes before any success. Journal deletion/reappearance is handled conservatively. |
+| Candidate missing or stale after authority advanced | **Fail closed**; this may mean permanent unavailability without trusted administrative recovery. No rollback, no silent re-enrollment. |
+
+**How to test:** Run the current unit/integration suite as a regression baseline, then a separate instrumented child-process/VM harness at each cut point. Distinguish forced process termination (logic coverage) from genuine hard-power-loss/VM power-off (durability evidence); ordinary reboot and VM snapshot restore are different threats. Record OS build, filesystem, mount/volume options, hypervisor or controller, storage cache/flush behavior, failure injection point, authority checkpoint, raw candidate/intent/active file hashes after reboot and whether the store refused access. Repeat after failures and with concurrency. A passed run is evidence for that exact environment, **not** a universal hardware guarantee.
+
+**Decision / sequencing:** Do not add a generic `IDurabilityProvider` or claim Windows support by switching to path-based `MoveFileEx`; that would add surface area or regress SA-02 without evidence. Keep protected mutations disabled for both platforms. First create a narrowly scoped power-loss/crash test harness and validate Linux's barriers and cleanup; investigate a handle-safe, documented and tested Windows namespace barrier separately. Only later integrate writes together with profile/downgrade pinning and SA-04 nonce safety. SA-03, SA-04, SA-08 remain OPEN, Phase 27 NO-GO.
+
+## Consolidated integration boundary — 21 October 2026
+
+Stage 2B4 above was present only in the attachment's `design/` copy; its unique analysis has been preserved here. The former path now forwards to this maintained contract. The historical `WriteNewAsync` path now delegates to `StoreFilePublication`; Linux rename + directory fsync and Windows handle-relative rename retain their confinement model. No generic durability provider or real server is introduced.
+
+The read-only inspection option now rejects either rollback journal name before reading authority state. An old committed checkpoint cannot settle a locally ambiguous request; malformed, partial and complete evidence all block this probe without cleanup. This restriction also applies to an already-open probe on each subsequent load. It is **not** a protected profile or a retroactive promise for ordinary v1 opens. The diagnostic inspector still grants no mutation, material access, retry or cleanup permission.
+
+| Operation | Executable support |
+| --- | --- |
+| Ordinary create/write/delete/rotation, root re-protection | Experimental v1 only; no rollback guarantee; post-publication failures uncertain |
+| Authority inspection, pinned UUID, exact authenticated bytes | Read-only; no local journal, pending checkpoint or authority error permitted |
+| First enrollment / normal-to-protected migration | BLOCKED; no automatic registration or server-loss fallback |
+| Protected write/delete/rotation/rekey/re-protection | BLOCKED on Windows and Linux before any RPC |
+| Request-aware prepare/finalize/enroll reconciliation | Contracts + test models; no production executor |
+| Recovery / permanent journal cleanup / authority reset | BLOCKED; preserve evidence; trusted manual investigation |
+
+A future profile must authenticate store UUID + authority identity + format selection, use only request-aware fenced mutations, save the exact candidate and authenticated original request tuples before send, re-establish durable publication before finalize, and return success only after final reconciliation. Restoring a pre-enrollment v1 backup and invoking an ordinary/legacy opener cannot be made safe by a local marker alone. Independent trusted deployment state is necessary; controlling executable code and all trusted configuration is outside the guarantee. No supported protected profile is exposed until this gap and the physical gates are resolved. Tests of a volatile authority with copied restart state or an abstract independent anchor are logical contract tests, not provider certification.

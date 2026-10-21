@@ -370,3 +370,56 @@ Tests use private reflection only to access the existing internal Linux director
 ### SA-03 checkpoint — independent rollback authority contract (20 October 2026)
 
 Added `Laveyana.Security.Abstractions.Rollback` (immutable per-store checkpoints, pending/committed model, optional authority CAS contract, fail-closed snapshot gate) and contract-level NUnit regression cases. See [rollback contract](../design/Laveyana.Security.RollbackAuthorityContract.md). No filesystem hook, actual trusted durable authority, crash recovery integration or platform security tests are delivered by this change; no filesystem capability flag is raised. **SA-03 OPEN, SA-04 OPEN, Phase 27 NO-GO, filesystem EXPERIMENTAL / TEST ONLY.** Build/tests on the exact patched revision remain unverified in this packaging environment.
+
+## Consolidated security self-review — 21 October 2026
+
+**Current disposition: SA-02 scoped closure retained; SA-03 / SA-04 / SA-08 OPEN; Phase 27 NO-GO; FileSystem EXPERIMENTAL / TEST ONLY.** This addendum supersedes earlier current-status summaries, while preserving their historical evidence. The source is the attached export, not a Git checkout. Exact hashes and executed commands are in the delivered `VERIFICATION_REPORT.ru.md`. Self-review is not an independent audit.
+
+### Implemented restrictions and their costs
+
+- A persisted software AES key was previously passed to nonce policy as `FreshlyGenerated` by default. The process-local dictionary could restart a budget without establishing the key's full history. The backend now registers only material it generates itself, binds the budget to its exact identity and private material fingerprint, and never registers a persisted/imported key during reads. Every encryption uses that same atomic lifetime budget. A different backend must explicitly rotate before forward encryption; historical decrypt remains usable. No automatic rotation hides this behavior change.
+- At most `q = 2^20` randomized nonces are issued per supported fresh material lifetime. Assuming independent uniform 96-bit CSPRNG output, nonce-collision probability is at most `q(q-1)/2^97 < 2^-57`. This is a probabilistic nonce bound, not strict uniqueness or a complete GCM forgery analysis. Actual software messages remain bounded to 16 MiB. External use of the same material, RNG compromise, restored/cloned running memory and arbitrary trusted-code replacement are outside this profile. Fresh key collisions remain probabilistic too.
+- A capability flag plus `IRollbackProtectedNonceAllocator` previously selected deterministic issuance without a separate verified trust profile; a new encryption session also cannot establish another session's reservation history. The policy now rejects that selection. The reservation machinery remains test-model-only; default reservations, overlap, exhaustion and ambiguous/canceled commits cannot become production nonce assurances.
+- Snapshot/bootstrap and journal share internal exact-byte publication. Native Move's original signatures and pinned-handle checks remain available to SA-02 regressions. Once publication starts, exceptions/cancellation report uncertainty; secondary temporary cleanup failures do not replace the original failure. This is conservative even when a particular failed native call had no effect.
+- Authority inspection rejects local candidate OR intent before RPC, on opening and subsequent loads. Old committed state cannot settle a delayed staged request. Read-only failures preserve file contents and entries. Ordinary v1 mode is still explicitly unprotected; no marker claims to fix legacy/pre-enrollment rollback.
+
+### Physical storage assumptions and platform boundary
+
+| Layer | What is implemented / assumed | Still unverified or blocked |
+| --- | --- | --- |
+| File data | Exclusive pinned temporary file; complete write; `Flush(true)`; bounded exact reread | Device/controller must honor flush and report failures; reread can come from cache |
+| Linux name publication | `renameat` / no-replace `renameat2` then `fsync` on the same retained parent fd | Qualification on the selected local filesystem, kernel, mount, host storage and fault model; tests here use container overlayfs |
+| Windows NTFS name publication | Native handle-relative `NtSetInformationFile`; destination validation | No independently justified namespace persistence barrier is implemented; existence does not prove power-loss durability |
+| Root/bootstrap creation | Two separately authenticated/validated ordinary publications; incomplete bootstrap fails closed | Creating the root does not flush all ancestor namespace changes; initial provisioning is not power-loss-qualified |
+| Cleanup | Descriptor/handle-relative temporary deletion; no automatic rollback-journal deletion | Linux `Remove` does not fsync deletion; no recovery conclusion may depend on permanent cleanup |
+| VM / hardware | No virtual-disk or controller qualification | Guest flush propagation, host caching, volatile caches/PLP, filesystem recovery, network/FUSE/overlay semantics |
+
+**Protected writes are blocked on both platforms before any authority mutation.** No real authority, profile enrollment or recovery executor is shipped. Ordinary experimental writes remain available. Linux fsync is the relevant primitive, not a certification of the container storage stack. Windows file flushing is not generalized into a proof for native rename. Sources: [Linux fsync(2)](https://man7.org/linux/man-pages/man2/fsync.2.html), [Microsoft FlushFileBuffers](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers), [NIST SP 800-38D, sections 8.2–8.3](https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf). The probability formula above is a birthday-bound calculation for this chosen limit.
+
+### Threat / acceptance matrix
+
+| Scenario | Executable behavior / regression | Residual gate |
+| --- | --- | --- |
+| Valid historical whole snapshot, wrong UUID or pending checkpoint | Existing exact-byte authority read gate rejects; journal presence now blocks even old committed match | Ordinary/legacy v1 can omit authority; no protected profile claimed |
+| Lost response / delayed prepare, enroll or finalize / replay | Original request IDs and terminal fences in contract models; restart copies retain decisions; old model DB behind abstract independent anchor refuses service/re-enroll | Real transport identity, persistent decisions/fences, failover/restore and provider independence unverified |
+| Crash during temporary data/flush/rename | Fault callbacks and real child writer termination; reopen accepts authenticated old or new state, never a partial file | Process kill is not a power cut; no full integrated remote transaction exists |
+| Candidate written but intent absent, tampered or incomplete | Authenticated journal reader rejects; published evidence retained; process-kill journal tests cover candidate/intent publication | No automatic continuation or permanent cleanup protocol |
+| Cancellation after possible publication | Uncertain I/O result; software commits are not blindly retried | User must reconcile exact persisted state; no transactional cancellation guarantee |
+| Competing cooperating library processes | One name claim wins under the same native lock; snapshot remains authentic | Same-identity hostile code and arbitrary root/ACL authority are outside confinement's cooperative guarantee |
+| Stored/imported AES / recreated backend / independent process | Forward encryption rejected; historical decrypt available; explicit fresh rotation restores bounded encryption | No cross-restart forward lifetime without an independently verified provider |
+| Forged allocator capability / duplicate or exhausted range | Deterministic production selection rejected; isolated model regressions retain bounds and poison uncertainty | Allocator key-wide reservation history, material aliases, memory/VM restore remain external |
+
+### Independent review priorities
+
+1. Verify that no ordinary, migration, flag or old-format API is represented as a protected profile; examine pre-enrollment backups, code/configuration trust and authority identity binding before enabling any writer.
+2. Review fresh-material provenance against authenticated material substitution, rollback/version reuse, concurrent generation, failed/ambiguous store commits, backend recreation, rotation and external aliases. An application using running memory snapshots needs a different provider/profile.
+3. Re-run every crash boundary on Windows and a specified Linux filesystem; inspect original TRX for required regressions and platform skips. Review preserved SA-02 native handle lifetimes and cleanup exception paths.
+4. Qualify request-aware authority restarts/failover/old backups, immutable argument bindings, durable negative fences, late deliveries and ABA. The volatile test fake is not a production candidate.
+
+### Reproducible abrupt VM-stop plan — NOT RUN
+
+Use a disposable VM and a dedicated test-only volume; the worker uses public synthetic fixture material. Build Release first. In the guest, set `LAVEYANA_TEST_WORKER_ROOT` to an isolated persistent absolute store directory, `LAVEYANA_TEST_WORKER_SIGNAL` to a sibling ready file, and `LAVEYANA_TEST_WORKER_PROVIDER` to `11111111-1111-4111-8111-111111111111`. Set `LAVEYANA_TEST_WORKER_MODE=init`, then run `dotnet vstest tests/Laveyana.Security.IntegrationTests/bin/Release/net10.0/Laveyana.Security.IntegrationTests.dll /TestCaseFilter:FullyQualifiedName~StoreProcessWorkerTests.RunWorker`.
+
+Remove the ready file. Set mode `kill` and `LAVEYANA_TEST_WORKER_BOUNDARY` to one of `TemporaryCreated`, `DataWritten`, `FileFlushed`, `BeforeRename`, `AfterRename`, `DirectoryFlushed` (Linux only), `Published`; invoke the same worker. It writes its PID to the ready file and blocks while holding the real store lock. From the **hypervisor host**, after observing that file, abruptly stop the disposable VM (Linux/libvirt: `virsh destroy LaveyanaPowerCut`; Hyper-V: `Stop-VM -Name LaveyanaPowerCut -TurnOff`). Do not substitute guest shutdown, save/suspend or graceful reboot. These commands were NOT executed here.
+
+Restart the VM, preserve/hashes-copy all files before any write, then set mode `inspect` and run the worker again. It opens read-only and reports authenticated old/candidate, or fails closed on invalid/incomplete state. Never interpret an error as permission to reset/enroll. Record exact SDK/OS, kernel/NTFS version, volume/mount options, VM storage/cache policy, host/controller/drive/PLP, hashes and byte lengths of bootstrap/active/candidate/intent/temps, boundary and observed refusal. Repeat from a clean test store for each boundary, with concurrent writers and injected disk-full/I/O failures. Journal/remote prepare/finalize power-cut qualification additionally requires the future protected protocol; it cannot be inferred from this ordinary writer harness. VM hard-stop still does not test physical loss of host/controller power. All such physical/VM trials and new Windows execution remain **NOT RUN / UNVERIFIED**.

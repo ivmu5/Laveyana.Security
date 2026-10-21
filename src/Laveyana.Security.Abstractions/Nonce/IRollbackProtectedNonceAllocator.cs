@@ -13,6 +13,8 @@ namespace Laveyana.Security.Abstractions.Nonce;
 /// callers MUST reconcile or abandon the uncertain reservation, never assume reuse is safe.
 /// Availability of this interface is not proof of an implementation's rollback resistance;
 /// deployments must establish that capability independently.
+/// The bundled software AES-GCM backend currently rejects supplied deterministic allocators
+/// because no independently verified allocator/profile integration is enabled.
 /// </remarks>
 public interface IRollbackProtectedNonceAllocator
 {

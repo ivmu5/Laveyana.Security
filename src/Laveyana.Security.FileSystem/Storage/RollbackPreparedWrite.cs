@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Laveyana.Security.Abstractions.Protection;
 using Laveyana.Security.Abstractions.Rollback;
 
 namespace Laveyana.Security.FileSystem.Storage;
@@ -26,7 +27,7 @@ internal sealed class RollbackPreparedWrite
         if (expected.StoreInstanceId != prepared.StoreInstanceId ||
             expected.Sequence == ulong.MaxValue || prepared.Sequence != expected.Sequence + 1 ||
             prepareRequestId.Equals(finalizeRequestId) ||
-            candidateSnapshot.Length is < 24 or > FileSystemSnapshotCodec.MaximumBodyLength + 65536 + 256)
+            candidateSnapshot.Length is < 24 or > FileSystemSnapshotCodec.MaximumBodyLength + ProtectedStoreEnvelope.MaximumEncodedLength + 256)
         {
             throw new ArgumentException("Invalid rollback staging transition or snapshot size.");
         }

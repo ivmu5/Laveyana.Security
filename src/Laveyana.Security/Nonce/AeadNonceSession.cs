@@ -63,6 +63,7 @@ internal sealed class AeadNonceSession : IDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             ThrowIfUnavailable();
             if (_poisoned)
             {
@@ -77,6 +78,7 @@ internal sealed class AeadNonceSession : IDisposable
                     // A canceled or faulted reservation may still have committed; never retry it here.
                     reservation = await _allocator!.ReserveAsync(_reference, RangeSize, cancellationToken)
                         .ConfigureAwait(false);
+                    cancellationToken.ThrowIfCancellationRequested();
                 }
                 catch
                 {

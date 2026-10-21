@@ -31,6 +31,8 @@ REQUIRED_UNIT = (
     "RollbackAuthorityContractTests.SimulatedProtocolRejectsConflictingPreparesAndHistoricalReplay",
     "RollbackAuthorityContractTests.OldAuthenticatedSnapshotIsRejectedAfterNewerCheckpointCommitted",
     "RollbackAuthorityContractTests.ContractLivesInAbstractionsAndCannotBeConfusedWithNonceAuthority",
+    "SoftwareNonceLifetimeTests.RejectedCreationsDoNotAccumulateFreshAesNonceBudgets",
+    "SoftwareNonceLifetimeTests.CreatingNonAesKeysDoesNotAllocateAesNonceBudgets",
     "RollbackRequestAuthorityContractTests.DelayedPrepareCannotApplyAfterUnknownRequestWasDurablyFenced",
     "RollbackRequestAuthorityContractTests.UnknownRequestIsUnresolvedWhenAuthorityCannotFenceIt",
     "RollbackRequestAuthorityContractTests.LostPrepareReplyIsResolvedFromTheOriginalRequestWithoutAnotherMutation",
@@ -38,6 +40,14 @@ REQUIRED_UNIT = (
     "RollbackRequestAuthorityContractTests.DelayedEnrollmentIsRejectedAfterResolutionFence",
     "RollbackRequestAuthorityContractTests.DelayedFinalizeCannotAdvanceAfterRequestWasFenced",
     "RollbackRequestAuthorityContractTests.ConcurrentDuplicatePrepareRequestsShareExactlyOneDecision",
+    "AeadNoncePolicyTests.DeterministicIsDisabledEvenWithBothUnverifiedCapabilities",
+    "AeadNoncePolicyTests.StoredHistoryAndMissingLifetimeBudgetAreRejected",
+    "AeadNoncePolicyTests.RandomizedLifetimeBudgetIsSharedAcrossConcurrentSessions",
+    "SoftwareNonceLifetimeTests.ReopenedBackendRejectsForwardEncryptionButCanDecryptAndExplicitlyRotate",
+    "SoftwareNonceLifetimeTests.GetOrCreateCannotResetAnExistingKeysNonceLifetime",
+    "SoftwareNonceLifetimeTests.AuthenticatedDifferentMaterialCannotInheritAFreshIdentityBudget",
+    "RollbackRequestAuthorityContractTests.SimulatedRestartPreservesAppliedDecisionsAndFences",
+    "RollbackRequestAuthorityContractTests.SimulatedOldAuthorityDatabaseCannotServeOrReenrollBehindIndependentAnchor",
     "SecurityObservabilityTests.BrokenDiagnosticsNeverRewriteOperationResults",
     "SecurityObservabilityTests.ThrowingSamplerDoesNotPreventActionOrChangeItsException",
     "SecurityObservabilityTests.ThrowingActivityStartedDoesNotLeakAmbientTraceOrRerunAction",
@@ -46,6 +56,8 @@ REQUIRED_UNIT = (
 )
 
 REQUIRED_INTEGRATION = (
+    "FileSystemKeyStoreTests.IndependentLibraryProcessesClaimExactlyOneName",
+    "FileSystemKeyStoreTests.RestartedProcessCannotResetStoredAesNonceLifetime",
     "FileSystemKeyStoreTests.HistoricalSnapshotReplayCannotBeDetectedWithoutExternalRollbackAuthority",
     "FileSystemKeyStoreTests.ReadOnlyOpenPreservesPendingFilesAndCommittedStoreBytes",
     "FileSystemKeyStoreTests.ReadOnlyOpenDoesNotCleanPendingFilesWhenSnapshotIsInvalid",
@@ -75,6 +87,8 @@ REQUIRED_PLATFORM = {
         "FileSystemKeyStoreTests.WindowsKilledExternalPendingWriterCannotAlterCommittedSnapshot",
     ),
     "Linux": (
+        "FileSystemKeyStoreTests.LinuxPublicationReportsDirectoryBarrierOnlyAfterRename",
+        "FileSystemKeyStoreTests.LinuxDirectoryBarrierFailureIsUncertainAfterVisibleRename",
         "FileSystemKeyStoreTests.InsecureRootPermissionsAreRejectedWithoutRepair",
         "FileSystemKeyStoreTests.SymlinkInAncestorIsRejected",
         "FileSystemKeyStoreTests.LinuxOpenDescriptorRemainsPinnedAfterPathRename",
@@ -89,6 +103,42 @@ REQUIRED_PLATFORM = {
         "LinuxSecureDirectoryLifetimeTests.LinuxPinnedRootConcurrentDisposeCannotWriteIntoReplacementDirectory",
     ),
 }
+
+# Exact parameterized cases are release gates too: discovery of one crash point
+# must not stand in for execution of the entire accepted local publication matrix.
+_PUBLICATION_CASES = (
+    ("TemporaryCreated", False), ("DataWritten", False), ("FileFlushed", False),
+    ("BeforeRename", False), ("AfterRename", True), ("Published", True),
+)
+REQUIRED_INTEGRATION += tuple(
+    f'FileSystemKeyStoreTests.{method}("{boundary}",{committed})'
+    for method in ("KilledLibraryWriterReopensOneAuthenticatedSnapshot",
+                   "SnapshotPublicationFaultKeepsOneAuthenticatedState")
+    for boundary, committed in _PUBLICATION_CASES
+)
+REQUIRED_INTEGRATION += tuple(
+    f'FileSystemKeyStoreTests.RollbackInspectionBlocksUnresolvedLocalEvidenceWithoutDeletingIt("{name}")'
+    for name in (".rollback-candidate.lsfs", ".rollback-intent.lsfs")
+)
+REQUIRED_INTEGRATION += tuple(
+    f'FileSystemKeyStoreTests.JournalBoundaryFailureRetainsPublishedEvidence("{boundary}","{name}")'
+    for boundary in ("FileFlushed", "AfterRename")
+    for name in (".rollback-candidate.lsfs", ".rollback-intent.lsfs")
+)
+REQUIRED_INTEGRATION += tuple(
+    'FileSystemKeyStoreTests.KilledJournalWriterPreservesExactCandidateAndPartialIntentEvidence'
+    f'("{boundary}","{name}",{candidate},{intent})'
+    for boundary, name, candidate, intent in (
+        ("FileFlushed", ".rollback-candidate.lsfs", False, False),
+        ("AfterRename", ".rollback-candidate.lsfs", True, False),
+        ("FileFlushed", ".rollback-intent.lsfs", True, False),
+        ("AfterRename", ".rollback-intent.lsfs", True, True),
+    )
+)
+REQUIRED_PLATFORM["Linux"] += (
+    'FileSystemKeyStoreTests.KilledLibraryWriterReopensOneAuthenticatedSnapshot("DirectoryFlushed",True)',
+)
+
 
 
 @dataclass(frozen=True)

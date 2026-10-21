@@ -14,8 +14,8 @@ namespace Laveyana.Security.FileSystem.Storage;
 /// <summary>A protected, single-snapshot, cooperatively locked experimental filesystem store.</summary>
 /// <remarks>
 /// EXPERIMENTAL / TEST ONLY: not approved to protect production secrets.
-/// The Windows handle-relative backend is an unverified SA-02 remediation candidate.
-/// Platform builds, adversarial races, durability and security review are still required.
+/// Windows and Linux retain handle-relative SA-02 confinement; that scoped acceptance
+/// does not establish rollback protection, physical durability or production readiness.
 /// The caller must explicitly enable experimental writes. Only already-protected material is accepted. Snapshot routing
 /// identifiers and names are not confidential; an authenticated manifest prevents
 /// undetected mutation of the whole snapshot but NOT replay of an older valid snapshot.
@@ -67,7 +67,7 @@ public sealed class FileSystemKeyStore : IKeyStore, IDisposable
             throw new ArgumentException("Invalid store options or protector identity.");
         }
 
-        // Stage 2B1: external authority verification is read-only until durable
+        // External authority verification is read-only until durable
         // staging/publication/recovery and downgrade protection are implemented.
         if (options.RollbackAuthority is not null &&
             (options.EnableExperimentalWrites || !options.ExpectedStoreInstanceId.HasValue ||
@@ -405,6 +405,16 @@ public sealed class FileSystemKeyStore : IKeyStore, IDisposable
 
     private async ValueTask<State> LoadAsync(CancellationToken cancellationToken)
     {
+        // Even the read-only probe cannot serve an old committed snapshot while a
+        // locally staged request might still arrive at the authority. Preserve evidence.
+        // Ordinary v1 experiments remain explicitly rollback-UNPROTECTED.
+        if (_options.RollbackAuthority is not null &&
+            (EntryExists(RollbackCandidateJournal.CandidateName) || EntryExists(RollbackCandidateJournal.IntentName)))
+        {
+            throw new InvalidDataException(
+                "Unresolved rollback staging evidence blocks inspection. Trusted manual recovery is required.");
+        }
+
         ValidateStoreFile(SnapshotName);
         byte[] bytes = await ReadBoundedAsync(SnapshotName,
             MaximumBodyLength + ProtectedStoreEnvelope.MaximumEncodedLength + 256, cancellationToken)
@@ -572,61 +582,10 @@ public sealed class FileSystemKeyStore : IKeyStore, IDisposable
             error.InnerException is Win32Exception { NativeErrorCode: 32 or 33 };
     }
 
-    private async ValueTask AtomicWriteAsync(string destination, byte[] data, bool overwrite,
-        CancellationToken cancellationToken)
-    {
-        string destinationName = Path.GetFileName(destination);
-        string temporaryName = $"{PendingPrefix}{Guid.NewGuid():N}{PendingSuffix}";
-        try
-        {
-            using (FileStream stream = _linuxDirectory is not null
-                ? _linuxDirectory.CreateTemporary(temporaryName)
-                : _windowsDirectory!.CreateTemporary(temporaryName))
-            {
-
-                await stream.WriteAsync(data, cancellationToken).ConfigureAwait(false);
-                stream.Flush(true);
-            }
-
-            byte[] staged = await ReadBoundedAsync(temporaryName, data.Length, cancellationToken)
-                .ConfigureAwait(false);
-            if (!staged.AsSpan().SequenceEqual(data))
-            {
-                throw new InvalidDataException("Staged store file differs from the committed candidate.");
-            }
-
-            cancellationToken.ThrowIfCancellationRequested();
-            if (EntryExists(destinationName))
-            {
-                ValidateStoreFile(destinationName);
-            }
-
-            if (_linuxDirectory is not null)
-            {
-                _linuxDirectory.Move(temporaryName, destinationName, overwrite);
-            }
-            else
-            {
-                if (!OperatingSystem.IsWindows())
-                {
-                    throw new PlatformNotSupportedException("Unsupported filesystem backend.");
-                }
-
-                _windowsDirectory!.Move(temporaryName, destinationName, overwrite);
-            }
-        }
-        finally
-        {
-            if (_linuxDirectory is not null)
-            {
-                _linuxDirectory.Remove(temporaryName);
-            }
-            else
-            {
-                _windowsDirectory?.Remove(temporaryName);
-            }
-        }
-    }
+    private ValueTask AtomicWriteAsync(string destination, byte[] data, bool overwrite,
+        CancellationToken cancellationToken) =>
+        StoreFilePublication.WriteAsync(_linuxDirectory, _windowsDirectory, Path.GetFileName(destination),
+            data, overwrite, cancellationToken, _options.WriteFault);
 
     private void CleanupAbandonedTemps()
     {

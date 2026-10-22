@@ -40,7 +40,7 @@ internal sealed class PortableKeyRecoveryTests
         using SensitiveMaterialLease wrong = PortableKeyRecovery.GenerateRecoverySecret();
         byte[] encoded = PortableKeyRecovery.Protect(material, original, Scope());
 
-        Assert.Throws<CryptographicException>(() => PortableKeyRecovery.Unprotect(encoded, wrong, Scope()));
+        Assert.Catch<CryptographicException>(() => PortableKeyRecovery.Unprotect(encoded, wrong, Scope()));
     }
 
     [Test]
@@ -50,7 +50,7 @@ internal sealed class PortableKeyRecoveryTests
         using SensitiveMaterialLease recoverySecret = PortableKeyRecovery.GenerateRecoverySecret();
         byte[] encoded = PortableKeyRecovery.Protect(material, recoverySecret, Scope());
 
-        Assert.Throws<CryptographicException>(() =>
+        Assert.Catch<CryptographicException>(() =>
             PortableKeyRecovery.Unprotect(encoded, recoverySecret, Scope("v2")));
     }
 
@@ -64,7 +64,7 @@ internal sealed class PortableKeyRecoveryTests
         {
             byte[] corrupted = (byte[])encoded.Clone();
             corrupted[offset] ^= 0x01;
-            Assert.Throws<CryptographicException>(() =>
+            Assert.Catch<CryptographicException>(() =>
                 PortableKeyRecovery.Unprotect(corrupted, recoverySecret, Scope()),
                 "Unexpected success for tampered byte at offset " + offset);
         }

@@ -110,3 +110,16 @@ Apple Secure Enclave **не реализован**; для Android есть то
 не прошёл испытания на устройствах. Компиляцию проверяет отдельный CI.
 Подробнее: [модуль Android](../../platforms/android/README.ru.md).
 Аттестация, биометрия, CAS и защита от rollback не гарантируются.
+
+## Apple Secure Enclave — экспериментальная реализация
+
+Отдельный проект iOS/Mac Catalyst
+`platforms/apple/Laveyana.Security.Maui.Apple` использует
+`INativeSigningKeyService`: аппаратные ключи P-256 (обязательный
+`SecTokenID.SecureEnclave`, режим `WhenUnlockedThisDeviceOnly`),
+публичные ключи SPKI и подписи IEEE P1363. Программного fallback нет.
+
+Платформенный проект **не входит** в основное решение. Проверки на реальном
+устройстве, аппаратная аттестация, авторизация пользователя,
+межпроцессный CAS и защищённый жизненный цикл **отсутствуют**.
+См. [модуль Apple](../../platforms/apple/README.ru.md).

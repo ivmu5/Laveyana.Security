@@ -1,0 +1,25 @@
+name: Apple Native Signing Compile
+
+on:
+  pull_request:
+    paths:
+      - 'platforms/apple/**'
+      - 'src/Laveyana.Security.Maui/NativeKeys/AppleP256PublicKeyCodec.cs'
+      - '.github/workflows/apple-native.yml'
+  workflow_dispatch:
+
+jobs:
+  apple-build:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Install Apple workloads
+        run: dotnet workload install ios maccatalyst --skip-manifest-update
+      - name: Restore Apple candidate
+        run: dotnet restore platforms/apple/Laveyana.Security.Maui.Apple/Laveyana.Security.Maui.Apple.csproj --force-evaluate
+      - name: Build Apple candidate
+        run: dotnet build platforms/apple/Laveyana.Security.Maui.Apple/Laveyana.Security.Maui.Apple.csproj -c Release --no-restore -warnaserror

@@ -109,3 +109,16 @@ This candidate is not in the default solution, does not run on Windows/Linux,
 and has no on-device acceptance yet. A platform-specific compile workflow is
 separate from core CI. See [Android module](../../platforms/android/README.md).
 No key attestation, user-presence policy, CAS, or rollback guarantee is implied.
+
+## Apple Secure Enclave candidate
+
+The optional iOS/Mac Catalyst-only `platforms/apple/Laveyana.Security.Maui.Apple`
+assembly implements the same `INativeSigningKeyService`. It explicitly
+requests hardware Secure Enclave P-256 keys with a
+`WhenUnlockedThisDeviceOnly` policy, transforms public X9.63 keys into
+SPKI and DER signatures into IEEE P1363. No software fallback is permitted.
+
+This separate workload project is **not** part of the core solution; device
+acceptance, hardware attestation, end-user authorization, cross-process CAS,
+and rollback-proof lifecycle are **not provided**. See
+[Apple native candidate](../../platforms/apple/README.md).

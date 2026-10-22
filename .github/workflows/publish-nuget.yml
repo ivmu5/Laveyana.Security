@@ -118,6 +118,7 @@ jobs:
       - name: Publish packages in dependency order
         shell: bash
         env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
           NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
         run: |
           set -euo pipefail
@@ -129,8 +130,8 @@ jobs:
             Laveyana.Security.Maui \
             Laveyana.Security.DependencyInjection
           do
-            package="$(find packages -maxdepth 1 -name "$name.*.nupkg" -print -quit)"
-            if [[ -z "$package" ]]; then
+            package="packages/$name.${RELEASE_TAG#v}.nupkg"
+            if [[ ! -f "$package" ]]; then
               echo "Missing package for $name."
               exit 1
             fi

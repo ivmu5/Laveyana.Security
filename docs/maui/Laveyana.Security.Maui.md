@@ -2,7 +2,7 @@
 
 **English** | [Русский](Laveyana.Security.Maui.ru.md)
 
-**Status:** source candidate for review, NOT compiled or platform-tested. No production-security acceptance is implied.
+**Status (22 October 2026):** common library and portable NUnit tests passed on Windows/Linux; Android and Apple workload projects compiled in GitHub Actions. Native hardware-device tests remain pending. Experimental only, not production approved.
 
 ## Purpose and boundaries
 
@@ -13,7 +13,7 @@ Capabilities:
 - Exact stable `ProviderId`/`SecretId` addressing; provider-scoped MAUI storage keys and a versioned record containing its own immutable identity to reject accidental record swaps.
 - `FindAsync`, `GetAsync` (owned `SensitiveMaterialLease`), `SetAsync`, `DeleteAsync` via the existing library interfaces.
 - Maximum raw material of **2048 bytes**. Values are Base64-encoded into `string` for the underlying MAUI API, with strict format and identity validation on reads.
-- Fail-closed errors; no implicit `RemoveAll`, missing-key creation, data migration, value recovery, automatic retry, fallback, or secret enumeration.
+- Malformed records and errors surfaced by `ISecureStorage` fail closed. An exact immediate readback rejects silent no-op or mismatched writes. The adapter itself never calls `RemoveAll`, retries automatically, or falls back. The Android MAUI backend may internally suppress errors or clear preferences, which the adapter cannot prevent.
 - Explicit DI registration; an `ISecureStorage` fake can be injected in unit tests.
 
 **Not guaranteed:** process isolation between app components, user-level authorization, zeroization of managed `string` copies, transactional/multi-process writes, hardware-backed key custody on every device, cross-device portability, durability after power failure, rollback protection, secure deletion or keys usable as safe persistent AES-GCM encryption roots.
@@ -58,7 +58,7 @@ result?.UseMaterial(bytes =>
 
 ## Platform notes
 
-- **Android:** MAUI uses encrypted preferences backed by Android key material. Android Auto Backup can restore ciphertext without the corresponding device key; a read may fail or a value may be removed by MAUI. Exclude the SecureStorage preferences from backup or define a recovery/re-authentication policy.
+- **Android:** MAUI uses encrypted preferences backed by Android keys. Backup/restore can make ciphertext unavailable. On some recovery failures `SecureStorage.Default` may **clear multiple preferences or return null instead of surfacing an error**, and writes may silently do nothing. Immediate readback detects a missing/mismatched *just-written* record, but cannot prove durability, prevent backend cleanup, or distinguish a later suppressed failure from genuine absence. Exclude these preferences from backup or use recoverable re-authentication. **Never automatically recreate an irreplaceable root secret solely because `GetAsync` returned null.**
 - **iOS / Mac Catalyst:** Keychain entries can survive app uninstallation; depending on configuration, iCloud Keychain may synchronize. Define application first-launch/user-switch cleanup explicitly; this adapter intentionally does not call `RemoveAll`.
 - **Windows:** MAUI uses DataProtectionProvider. Packaged settings are size-constrained; the 2048-byte raw material bound avoids large-value use. Packaged and unpackaged applications persist differently.
 
@@ -66,7 +66,7 @@ See Microsoft's [SecureStorage platform documentation](https://learn.microsoft.c
 
 ## Build and release gate
 
-- Add the module to `Laveyana.Security.sln` and a `Microsoft.Maui.Essentials` version to `Directory.Packages.props`; add tests to `Laveyana.Security.Tests` project references.
+- The common MAUI project is already in the solution and portable NUnit suite, with `Microsoft.Maui.Essentials` centrally versioned. Android and Apple use separate workload-specific projects and workflows.
 - **New NuGet dependency/lock files require regeneration** from a trusted .NET 10 SDK machine before `--locked-mode` CI will pass. Use the project's existing `scripts/Initialize-LockFiles.ps1` procedure and commit the generated locks. Do not edit locks manually.
 - Run `verify_repository.py`, `verify_api_layout.py`, `verify_documentation.py`, Release build and NUnit; test MAUI Android/iOS/Mac Catalyst/Windows behavior on real supported targets before claiming a validated public package.
 - `IsPackable=false` remains inherited. Public NuGet publishing of this module is deferred until the integration is verified.
@@ -93,7 +93,7 @@ The real Windows TPM create/sign/delete test requires an explicit
 persistent key after process termination. It is intentionally skipped by
 default; passing CI **does not prove TPM hardware functionality**.
 
-Apple Secure Enclave is **not implemented**; Android has only a separately compiled, unverified candidate.
+Android Keystore and Apple Secure Enclave both have separate **experimental implementations**, but neither has passed physical-device acceptance.
 This component is experimental and not accepted for production secrets or a
 stable NuGet release; SA-03/04/08 remain open.
 

@@ -4,7 +4,12 @@ on:
   pull_request:
     paths:
       - 'platforms/apple/**'
-      - 'src/Laveyana.Security.Maui/NativeKeys/AppleP256PublicKeyCodec.cs'
+      - 'src/Laveyana.Security.Maui/**'
+      - 'src/Laveyana.Security.Abstractions/**'
+      - 'tests/Laveyana.Security.Tests/Maui/**'
+      - 'Directory.Build.props'
+      - 'Directory.Packages.props'
+      - 'global.json'
       - '.github/workflows/apple-native.yml'
   workflow_dispatch:
 

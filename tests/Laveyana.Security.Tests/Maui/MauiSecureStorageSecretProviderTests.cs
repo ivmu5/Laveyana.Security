@@ -157,12 +157,85 @@ public sealed class MauiSecureStorageSecretProviderTests
         Assert.ThrowsAsync<IOException>(async () => await provider.GetAsync(new(id, SecretId.New())));
     }
 
+    [Test]
+    public void SilentNoOpWriteCannotReportSuccess()
+    {
+        ProviderId id = ProviderId.New();
+        SecretReference reference = new(id, SecretId.New());
+        MemorySecureStorage storage = new() { SuppressWrites = true };
+        MauiSecureStorageSecretProvider provider = new(id, storage);
+        using SensitiveMaterialLease secret = SensitiveMaterialLease.CreateCopy("fixture"u8);
+
+        Assert.ThrowsAsync<IOException>(async () => await provider.SetAsync(reference, secret));
+        Assert.That(storage.Items, Is.Empty);
+        Assert.That(storage.ReadCalls, Is.EqualTo(1));
+        Assert.That(storage.RemoveAllCalls, Is.Zero);
+    }
+
+    [Test]
+    public void ImmediateReadbackRejectsDifferentValue()
+    {
+        ProviderId id = ProviderId.New();
+        SecretReference reference = new(id, SecretId.New());
+        MemorySecureStorage storage = new() { SubstituteRead = true };
+        MauiSecureStorageSecretProvider provider = new(id, storage);
+        using SensitiveMaterialLease secret = SensitiveMaterialLease.CreateCopy("fixture"u8);
+
+        Assert.ThrowsAsync<IOException>(async () => await provider.SetAsync(reference, secret));
+        Assert.That(storage.Items, Has.Count.EqualTo(1), "A failed verification does not undo a committed write.");
+        Assert.That(storage.RemoveAllCalls, Is.Zero);
+    }
+
+    [Test]
+    public async Task UnderlyingPlatformReadRecoveryCanHideLossAndEraseOtherEntries()
+    {
+        ProviderId id = ProviderId.New();
+        SecretReference reference = new(id, SecretId.New());
+        MemorySecureStorage storage = new();
+        MauiSecureStorageSecretProvider provider = new(id, storage);
+        using (SensitiveMaterialLease secret = SensitiveMaterialLease.CreateCopy("fixture"u8))
+        {
+            await provider.SetAsync(reference, secret);
+        }
+
+        storage.Items["unrelated"] = "other";
+        storage.ClearOnRead = true;
+        // Documents a limitation of ISecureStorage; do not interpret null
+        // as proof that a critical key never existed.
+        Assert.That(await provider.GetAsync(reference), Is.Null);
+        Assert.That(storage.Items, Is.Empty);
+        Assert.That(storage.RemoveAllCalls, Is.Zero);
+    }
+
+    [Test]
+    public async Task UnderlyingPlatformDeleteRecoveryMayEraseOtherEntries()
+    {
+        ProviderId id = ProviderId.New();
+        SecretReference reference = new(id, SecretId.New());
+        MemorySecureStorage storage = new();
+        MauiSecureStorageSecretProvider provider = new(id, storage);
+        using (SensitiveMaterialLease secret = SensitiveMaterialLease.CreateCopy("fixture"u8))
+        {
+            await provider.SetAsync(reference, secret);
+        }
+
+        storage.Items["unrelated"] = "other";
+        storage.ClearOnRemove = true;
+        await provider.DeleteAsync(reference);
+        Assert.That(storage.Items, Is.Empty);
+        Assert.That(storage.RemoveAllCalls, Is.Zero);
+    }
+
     private sealed class MemorySecureStorage : ISecureStorage
     {
         public ConcurrentDictionary<string, string> Items { get; } = new(StringComparer.Ordinal);
         public int RemoveAllCalls { get; private set; }
         public int ReadCalls { get; private set; }
         public bool ThrowOnRead { get; init; }
+        public bool SuppressWrites { get; init; }
+        public bool SubstituteRead { get; init; }
+        public bool ClearOnRead { get; set; }
+        public bool ClearOnRemove { get; set; }
 
         public Task<string?> GetAsync(string key)
         {
@@ -172,16 +245,40 @@ public sealed class MauiSecureStorageSecretProviderTests
                 throw new IOException("Simulated platform failure.");
             }
 
+            if (ClearOnRead)
+            {
+                Items.Clear();
+                return Task.FromResult<string?>(null);
+            }
+
+            if (SubstituteRead)
+            {
+                return Task.FromResult<string?>("unexpected-backend-value");
+            }
+
             return Task.FromResult(Items.TryGetValue(key, out string? value) ? value : null);
         }
 
         public Task SetAsync(string key, string value)
         {
-            Items[key] = value;
+            if (!SuppressWrites)
+            {
+                Items[key] = value;
+            }
+
             return Task.CompletedTask;
         }
 
-        public bool Remove(string key) => Items.TryRemove(key, out _);
+        public bool Remove(string key)
+        {
+            if (ClearOnRemove)
+            {
+                Items.Clear();
+                return true;
+            }
+
+            return Items.TryRemove(key, out _);
+        }
 
         public void RemoveAll()
         {

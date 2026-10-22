@@ -10,13 +10,17 @@ namespace Laveyana.Security.Maui.Storage;
 
 /// <summary>
 /// App-scoped, best-effort secret management backed by MAUI ISecureStorage.
+/// An immediate readback checks writes, but cannot guarantee future persistence.
 /// </summary>
 /// <remarks>
 /// This is NOT an IKeyStore: MAUI ISecureStorage does not provide durable atomic CAS,
 /// cross-process transactions, a monotonic rollback authority, or power-loss guarantees.
 /// All code able to resolve this provider is trusted; it does not implement end-user
 /// authorization. Use only for small, recoverable app secrets, not master keys requiring
-/// durable lifecycle guarantees. No automatic RemoveAll or failure-to-absence fallback.
+/// durable lifecycle guarantees. The adapter never calls RemoveAll, but
+/// underlying Android MAUI SecureStorage can clear shared preferences or
+/// suppress errors and return null. Absence is not evidence that a key was
+/// never created; never automatically recreate irreplaceable roots from null.
 /// </remarks>
 public sealed class MauiSecureStorageSecretProvider : ISecretManagementProvider
 {
@@ -58,7 +62,9 @@ public sealed class MauiSecureStorageSecretProvider : ISecretManagementProvider
 
     /// <summary>
     /// Reads and validates one exact provider/secret identity into an owned, disposable lease.
-    /// Corruption and platform errors fail closed rather than looking like a missing secret.
+    /// Malformed records and surfaced platform errors fail closed. Platform errors
+    /// hidden by SecureStorage may appear as null and cannot be distinguished
+    /// from genuine absence by this adapter.
     /// </summary>
     public async ValueTask<SecretReadResult?> GetAsync(
         SecretReference reference, CancellationToken cancellationToken = default)
@@ -124,6 +130,7 @@ public sealed class MauiSecureStorageSecretProvider : ISecretManagementProvider
     /// <summary>
     /// Sets or replaces a secret by stable identity. No CAS or durable commit is promised;
     /// an exception near the platform write may leave the outcome unknown.
+    /// A matching immediate readback is required, not proof of durability.
     /// </summary>
     public async ValueTask SetAsync(
         SecretReference reference, SensitiveMaterialLease material,
@@ -148,11 +155,22 @@ public sealed class MauiSecureStorageSecretProvider : ISecretManagementProvider
 
         cancellationToken.ThrowIfCancellationRequested();
         await _storage.SetAsync(key, value!).ConfigureAwait(false);
+
+        // MAUI Android may swallow initialization errors and silently skip a
+        // write. Reject a missing or mismatched immediate readback. Do not
+        // attempt cleanup: a platform write may already have committed.
+        string? observed = await _storage.GetAsync(key).ConfigureAwait(false);
+        if (!string.Equals(value, observed, StringComparison.Ordinal))
+        {
+            throw new IOException("SecureStorage write could not be verified by immediate readback.");
+        }
     }
 
     /// <summary>
     /// Removes only this provider's exact key. Never clears other SecureStorage entries.
-    /// Missing values are treated as already deleted; platform errors propagate.
+    /// Missing values are treated as already deleted. Surfaced platform errors
+    /// propagate, but the underlying Android recovery can silently clear other
+    /// entries; this adapter cannot promise independent durable deletion.
     /// </summary>
     public ValueTask DeleteAsync(SecretReference reference, CancellationToken cancellationToken = default)
     {

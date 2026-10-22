@@ -31,3 +31,37 @@ dotnet build platforms/android/Laveyana.Security.Maui.Android/Laveyana.Security.
 Также необходимы проверки на устройствах.
 
 **Статус:** черновой кандидат, не production и не готов к NuGet.
+
+## Необязательный fail-closed backend Android (эксперимент)
+
+`Storage.AndroidFailClosedSecureStorage` — отдельная явно подключаемая
+реализация `ISecureStorage`. Это **не** `IKeyStore`, не полноценный
+менеджер ключей и не долговечная БД. Только небольшие восстанавливаемые
+секреты.
+
+В отличие от стандартной реализации MAUI, этот адаптер непосредственно
+открывает изолированное AndroidX `EncryptedSharedPreferences`, не подавляет
+ошибки и не удаляет повреждённые данные. Для записи используется синхронный
+`Commit()` вместо `Apply()`, отрицательный результат вызывает исключение.
+Существующий `MauiSecureStorageSecretProvider` отдельно перепроверяет
+значение чтением. `RemoveAll()` запрещён. **Это не** гарантия отсутствия
+rollback, транзакционного CAS или сохранности при отключении питания.
+
+AndroidX `EncryptedSharedPreferences` **устарел (deprecated)**. Мы
+переиспользуем существующее шифрование AndroidX, а не создаём самодельный
+AES-протокол. Это **не** подтверждение аппаратной защиты AES на любом Android
+и **не** готовое production-хранилище.
+
+В MAUI Android:
+```csharp
+builder.Services.AddLaveyanaAndroidFailClosedSecureStorage(stableProviderId);
+builder.Services.AddSecurity(security =>
+    security.UseSecretProvider<MauiSecureStorageSecretProvider>(stableProviderId));
+```
+
+Используется **новый изолированный** файл encrypted preferences. Существующие
+значения `SecureStorage.Default` туда автоматически **не переносятся**.
+Не включайте две реализации одновременно. Нужно исключить файл из Android
+Auto Backup и проверить на устройстве потери ключей, backup/restore, сбои
+`Commit`, завершение процесса и переустановку. CI проверяет **компиляцию**,
+а не работу на телефоне.

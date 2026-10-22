@@ -123,3 +123,17 @@ Android Keystore и Apple Secure Enclave имеют отдельные **экс�
 устройстве, аппаратная аттестация, авторизация пользователя,
 межпроцессный CAS и защищённый жизненный цикл **отсутствуют**.
 См. [модуль Apple](../../platforms/apple/README.ru.md).
+
+## Экспериментальный fail-closed backend Android
+
+Отдельная Android-сборка предоставляет
+`AddLaveyanaAndroidFailClosedSecureStorage(providerId)`: общий контракт
+`MauiSecureStorageSecretProvider` сохраняется, а под ним используется
+изолированное шифрованное AndroidX-хранилище. Реализация передаёт ошибки
+вызывающему коду, не удаляет данные при сбоях и использует синхронный
+`Commit`; проверка чтением после записи остаётся включённой.
+AndroidX API **помечен deprecated**, поэтому это экспериментальное
+улучшение, **не полное закрытие MAUI-01** и не production-хранилище.
+Автоматического переноса из `SecureStorage.Default` нет.
+
+См. [Android-заметки](../../platforms/android/README.ru.md).

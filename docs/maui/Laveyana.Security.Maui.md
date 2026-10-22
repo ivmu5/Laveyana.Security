@@ -121,3 +121,17 @@ This separate workload project is **not** part of the core solution; device
 acceptance, hardware attestation, end-user authorization, cross-process CAS,
 and rollback-proof lifecycle are **not provided**. See
 [Apple native candidate](../../platforms/apple/README.md).
+
+## Experimental fail-closed Android storage alternative
+
+The Android-only workload project provides opt-in
+`AddLaveyanaAndroidFailClosedSecureStorage(providerId)`. It retains the
+existing `MauiSecureStorageSecretProvider` interface, but replaces the
+underlying `ISecureStorage` with isolated AndroidX encrypted preferences
+that propagate surfaced errors, do not wipe/recover on failure, and use
+synchronous `Commit`. Readback remains enabled. The AndroidX encryption
+API is **deprecated** and this adapter is only a limited experimental
+improvement, **not a complete fix for MAUI-01** or a production key store.
+No automatic migration from `SecureStorage.Default` exists.
+
+See [Android notes](../../platforms/android/README.md).

@@ -80,7 +80,8 @@ public sealed class NativeSigningKeyContractTests
             Assert.That(found.ExportSubjectPublicKeyInfo(), Is.EqualTo(publicKey));
 
             // A duplicate create must not silently replace the key.
-            Assert.ThrowsAsync<CryptographicException>(async () => await reopened.CreateAsync(keyId));
+            INativeSigningKeyService duplicateAttempt = reopened;
+            Assert.ThrowsAsync<CryptographicException>(async () => await duplicateAttempt.CreateAsync(keyId));
             Assert.That((await reopened.FindAsync(keyId))!.ExportSubjectPublicKeyInfo(), Is.EqualTo(publicKey));
 
             byte[] message = "native-test"u8.ToArray();

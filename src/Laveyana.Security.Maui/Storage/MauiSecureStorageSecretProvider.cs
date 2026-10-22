@@ -167,7 +167,8 @@ public sealed class MauiSecureStorageSecretProvider : ISecretManagementProvider
     }
 
     /// <summary>
-    /// Removes only this provider's exact key. Never clears other SecureStorage entries.
+    /// Requests removal of this provider's exact key; the underlying platform
+    /// may perform broader recovery cleanup outside the adapter's control.
     /// Missing values are treated as already deleted. Surfaced platform errors
     /// propagate, but the underlying Android recovery can silently clear other
     /// entries; this adapter cannot promise independent durable deletion.

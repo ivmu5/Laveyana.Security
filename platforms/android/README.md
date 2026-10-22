@@ -34,3 +34,39 @@ the release solution, commit a genuine platform lock file and enable locked
 restore. Physical device and emulator tests are still needed.
 
 **Status:** draft candidate, not production or NuGet-ready.
+
+## Optional fail-closed encrypted preferences (storage experiment)
+
+`Storage.AndroidFailClosedSecureStorage` is a **separate opt-in**
+`ISecureStorage` implementation. It is not a `IKeyStore`, key custodian
+or guaranteed-durable database. Use it only for small, reproducible tokens.
+
+Unlike the default MAUI Android implementation it directly opens isolated
+AndroidX `EncryptedSharedPreferences`, never catches/deletes/recreates
+corrupt preferences, calls synchronous `Commit()` and treats `false` as a
+write failure. The existing `MauiSecureStorageSecretProvider` adds immediate
+readback verification. Underlying exceptions are preserved. `RemoveAll()`
+is deliberately unsupported. These behaviors are **not** rollback protection,
+power-cut durability, cross-process CAS or proof that a missing entry never existed.
+
+AndroidX `EncryptedSharedPreferences` is **deprecated**. This is a
+short-term experiment using its existing authenticated encryption, *not* a
+new custom AES implementation. Do not claim hardware-bound AES keys,
+strong key deletion or production safety based on this component.
+
+Example MAUI Android composition:
+
+```csharp
+builder.Services.AddLaveyanaAndroidFailClosedSecureStorage(stableProviderId);
+builder.Services.AddSecurity(security =>
+    security.UseSecretProvider<MauiSecureStorageSecretProvider>(stableProviderId));
+```
+
+This creates a **new, provider-isolated** encrypted preferences file. It
+does not read/migrate old `SecureStorage.Default` values. Do not enable both
+registrations. Exclude its preferences file from Android Auto Backup, and
+test lost-key, backup/restore, process-crash, commit failure and device
+reinstall behavior. The platform CI **compiles only**; no Android device
+execution has been completed.
+
+There is intentionally no generic data migration or implicit error recovery.

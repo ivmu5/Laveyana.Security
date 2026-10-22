@@ -116,9 +116,11 @@ public sealed class AndroidFailClosedSecureStorage : ISecureStorage
         // AndroidX's encryption primitive is used as-is: we do not implement
         // our own AEAD or reset/recover a broken keyset. Keep every exception.
 #pragma warning disable CS0618 // AndroidX EncryptedSharedPreferences API is deprecated.
-        using MasterKey master = new MasterKey.Builder(_context, _masterAlias)
-            .SetKeyScheme(MasterKey.KeyScheme.Aes256Gcm)
-            .Build();
+        using MasterKey.Builder builder = new(_context, _masterAlias);
+        MasterKey.Builder configured = builder.SetKeyScheme(MasterKey.KeyScheme.Aes256Gcm)
+            ?? throw new IOException("Android master key scheme configuration failed.");
+        using MasterKey master = configured.Build()
+            ?? throw new IOException("Android Keystore master key is unavailable.");
         return EncryptedSharedPreferences.Create(_context, _preferencesName, master,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.Aes256Siv,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.Aes256Gcm)

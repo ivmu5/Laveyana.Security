@@ -1,16 +1,6 @@
 name: Android Native Signing Compile
 
 on:
-  pull_request:
-    paths:
-      - 'platforms/android/**'
-      - 'src/Laveyana.Security.Maui/**'
-      - 'src/Laveyana.Security.Abstractions/**'
-      - 'tests/Laveyana.Security.Tests/Maui/**'
-      - 'Directory.Build.props'
-      - 'Directory.Packages.props'
-      - 'global.json'
-      - '.github/workflows/android-native.yml'
   workflow_dispatch:
 
 jobs:

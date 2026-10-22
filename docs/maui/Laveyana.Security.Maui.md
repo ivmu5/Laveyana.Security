@@ -106,8 +106,7 @@ security level is not TEE or StrongBox and provides ECDSA P-256/SHA-256
 signing with 64-byte IEEE P1363 results.
 
 This candidate is not in the default solution, does not run on Windows/Linux,
-and has no on-device acceptance yet. A platform-specific compile workflow is
-separate from core CI. See [Android module](../../platforms/android/README.md).
+and has no on-device acceptance yet. Native compilation is gated through the required Verify workflow when relevant paths change. See [Android module](../../platforms/android/README.md).
 No key attestation, user-presence policy, CAS, or rollback guarantee is implied.
 
 ## Apple Secure Enclave candidate

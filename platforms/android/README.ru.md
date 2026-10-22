@@ -25,8 +25,8 @@ dotnet restore platforms/android/Laveyana.Security.Maui.Android/Laveyana.Securit
 dotnet build platforms/android/Laveyana.Security.Maui.Android/Laveyana.Security.Maui.Android.csproj -c Release --no-restore
 ```
 
-Отдельный GitHub Actions проверяет компиляцию Android-проекта. Обычный
-CI Windows/Linux его **не компилирует**. Перед релизом нужно зафиксировать
+Обязательный Verify условно компилирует Android-проект при изменении
+его зависимостей; отдельный workflow запускается вручную. Перед релизом нужно зафиксировать
 настоящий NuGet lock-файл платформенного проекта и проверять locked restore.
 Также необходимы проверки на устройствах.
 

@@ -11,6 +11,9 @@ namespace Laveyana.Security.Maui.NativeKeys;
 /// fall back from required hardware-backed keys to software storage. Callers must
 /// persist IDs and never reuse one after deletion. Failures around creation and
 /// deletion can have uncertain persistent outcomes: reconcile with FindAsync.
+/// There is no atomic cross-process CreateIfAbsent or key version lifecycle.
+/// Callers must authenticate purpose/protocol/version by domain-separating all
+/// signed messages; this low-level API signs the exact supplied bytes.
 /// </remarks>
 public interface INativeSigningKeyService
 {
@@ -20,12 +23,13 @@ public interface INativeSigningKeyService
     /// <summary>Creates a non-exportable signing key under a previously unused ID.</summary>
     ValueTask<NativeSigningKeyInfo> CreateAsync(KeyId keyId, CancellationToken cancellationToken = default);
 
-    /// <summary>Reads the public key for an exact ID or returns null when absent.</summary>
+    /// <summary>Reads the public key and owning ProviderId for an exact ID, or null when absent.</summary>
     ValueTask<NativeSigningKeyInfo?> FindAsync(KeyId keyId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Signs using ECDSA P-256/SHA-256. Returns a 64-byte IEEE P1363 (r || s)
-    /// signature, not ASN.1 DER.
+    /// signature, not ASN.1 DER. There is no automatic domain separation;
+    /// different protocols MUST use distinct unambiguous message encodings.
     /// </summary>
     ValueTask<byte[]> SignAsync(KeyId keyId, ReadOnlyMemory<byte> message,
         CancellationToken cancellationToken = default);

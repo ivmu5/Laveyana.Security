@@ -10,11 +10,11 @@ public sealed class NativeSigningKeyInfo
     private readonly byte[] _subjectPublicKeyInfo;
 
     /// <summary>Validates and owns a canonical NIST P-256 public SubjectPublicKeyInfo.</summary>
-    public NativeSigningKeyInfo(KeyId keyId, ReadOnlySpan<byte> subjectPublicKeyInfo)
+    public NativeSigningKeyInfo(ProviderId providerId, KeyId keyId, ReadOnlySpan<byte> subjectPublicKeyInfo)
     {
-        if (!keyId.IsDefined || subjectPublicKeyInfo.IsEmpty || subjectPublicKeyInfo.Length > 512)
+        if (!providerId.IsDefined || !keyId.IsDefined || subjectPublicKeyInfo.IsEmpty || subjectPublicKeyInfo.Length > 512)
         {
-            throw new ArgumentException("A defined key ID and bounded public key are required.");
+            throw new ArgumentException("Defined provider/key identities and a bounded public key are required.");
         }
 
         using ECDsa publicKey = ECDsa.Create();
@@ -28,11 +28,15 @@ public sealed class NativeSigningKeyInfo
             throw new CryptographicException("Expected a canonical ECDSA NIST P-256 public key.");
         }
 
+        ProviderId = providerId;
         KeyId = keyId;
         _subjectPublicKeyInfo = subjectPublicKeyInfo.ToArray();
     }
 
-    /// <summary>Exact application-owned key identity.</summary>
+    /// <summary>Stable owning provider identity, not a runtime alias.</summary>
+    public ProviderId ProviderId { get; }
+
+    /// <summary>Exact application-owned key identity within ProviderId.</summary>
     public KeyId KeyId { get; }
 
     /// <summary>Exports only the public X.509 SubjectPublicKeyInfo.</summary>

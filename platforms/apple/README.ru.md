@@ -38,6 +38,6 @@ dotnet restore platforms/apple/Laveyana.Security.Maui.Apple/Laveyana.Security.Ma
 dotnet build platforms/apple/Laveyana.Security.Maui.Apple/Laveyana.Security.Maui.Apple.csproj -c Release --no-restore
 ```
 
-Отдельный CI проверяет только компиляцию. Перед релизом необходимо
+Обязательный Verify условно проверяет компиляцию Apple-проекта при соответствующих изменениях; отдельный workflow запускается вручную. Перед релизом необходимо
 проверить создание и подпись на реальном iOS-устройстве и Mac, зафиксировать
 настоящие lock-файлы и выполнить необходимые security-gate проверки.

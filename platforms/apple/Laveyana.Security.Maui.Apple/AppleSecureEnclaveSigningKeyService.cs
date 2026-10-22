@@ -166,13 +166,13 @@ public sealed class AppleSecureEnclaveSigningKeyService : INativeSigningKeyServi
         TokenID = SecTokenID.SecureEnclave
     };
 
-    private static NativeSigningKeyInfo PublicInfo(SecKey privateKey, KeyId keyId)
+    private NativeSigningKeyInfo PublicInfo(SecKey privateKey, KeyId keyId)
     {
         using SecKey publicKey = privateKey.GetPublicKey()
             ?? throw new CryptographicException("Secure Enclave public key unavailable.");
         using NSData representation = publicKey.GetExternalRepresentation(out NSError? _)
             ?? throw new CryptographicException("Secure Enclave public point unavailable.");
-        return new NativeSigningKeyInfo(keyId,
+        return new NativeSigningKeyInfo(ProviderId, keyId,
             AppleP256PublicKeyCodec.ToSubjectPublicKeyInfo(representation.ToArray()));
     }
 

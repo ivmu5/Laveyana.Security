@@ -70,3 +70,5 @@ reinstall behavior. The platform CI **compiles only**; no Android device
 execution has been completed.
 
 There is intentionally no generic data migration or implicit error recovery.
+
+<!-- CI-only smoke: Android change, Apple should skip; do not merge. -->

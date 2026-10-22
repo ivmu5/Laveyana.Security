@@ -5,6 +5,16 @@
 This changelog records **unreleased development checkpoints**, not production releases or successful security acceptance. Version configured in `Directory.Build.props`: `1.2610.0-alpha.1`. No public package, compatibility promise or release tag is asserted by this document.
 
 
+## Unreleased — Independent MAUI/native review follow-up (2026-10-22)
+
+- **CI-01:** Keep both mandatory Windows/Linux NUnit jobs runnable after legitimately skipped native builds. Their explicit guard now requires `Source & docs` success; a failed native dependency gate cannot be treated as a pass.
+- **CI-02 / CI-03:** Parse NUL-delimited Git paths and include renamed/deleted paths, Unicode names, newly added/nested `.props`, `.targets`, `.rsp`, `.editorconfig`, `.globalconfig`, `NuGet.Config` and related build inputs in conditional Android/Apple compilation. Add repeatable detector regression tests.
+- **MAUI/native (earlier unreleased checkpoints):** Introduced `MauiSecureStorageSecretProvider` for recoverable small secrets with read-after-write verification; default Android MAUI may silently clear or suppress underlying errors. Added experimental non-exportable P-256 signing via Windows TPM, Android Keystore and Apple Secure Enclave, all pending real-device acceptance.
+- **Breaking experimental API:** `NativeSigningKeyInfo` constructor changed from `NativeSigningKeyInfo(KeyId, ReadOnlySpan<byte>)` to **`NativeSigningKeyInfo(ProviderId, KeyId, ReadOnlySpan<byte>)`**. Existing callers must supply the persisted provider identity; this does not implement attestation, enrollment, atomic create, domain separation or rollback protection.
+- **Native compile gate:** When shared/native sources or build inputs change, the required `Verify` workflow conditionally builds Android and Apple and gates the required `Source & docs` result; platform-independent changes skip native workloads but **must still run Windows/Linux NUnit**. The standalone native compile workflows remain manual-only.
+- **Android experimental storage:** A separate opt-in fail-closed AndroidX EncryptedSharedPreferences adapter was added in PR #23. AndroidX is deprecated; this adapter is not production-accepted or a complete remedy for MAUI's strict null/absence contract conflict. No automatic migration is provided.
+- **Security acceptance unchanged:** Filesystem persistence remains experimental; **SA-03/SA-04/SA-08 OPEN, Phase 27 NO-GO**. Platform hardware tests, reproducible platform dependency locks and release packaging remain outstanding.
+
 ## Unreleased — SA-03 Stage 2B3: recovery state inspection (2026-10-20)
 
 - Add an internal, **read-only** recovery inspector for authenticated staged and active snapshots against a fresh authority state. Recognize four exact checkpoint combinations; block mismatches, replay and indistinguishable old/new digests.

@@ -30,3 +30,26 @@
 - **NOT** a solution to SA-03/04/08, cross-device attestation, Android `SecureStorage` suppressed failures or the software backend's AES-GCM nonce provenance. Restored key material must not be automatically imported for forward AES-GCM encryption where historical nonce use is unknown.
 - If recovery secret is lost, recovery may be impossible. If an attacker learns the recovery secret **and** obtains the package, they can decrypt it.
 - This portable format is a **new security-sensitive protocol**. Static checks and CI unit tests are necessary but **not sufficient** to approve real users' valuable keys. Independent crypto review and device/platform acceptance remain pending.
+
+## Persistent v1 wire contract and compatibility
+
+The v1 binary layout is fixed. Offsets are measured from byte zero; all length fields use **little-endian** encoding:
+
+| Offset | Length | Meaning |
+| ---: | ---: | --- |
+| 0 | 4 | ASCII magic `LKR1` |
+| 4 | 1 | Format version, exactly `1` |
+| 5 | 1 | Reserved flags, exactly `0` |
+| 6 | 4 | Signed Int32 plaintext length, 1–65,536 |
+| 10 | 32 | Fresh random HKDF salt |
+| 42 | 12 | Fresh random AES-GCM nonce |
+| 54 | Plaintext length | Ciphertext |
+| 54 + plaintext length | 16 | AES-GCM authentication tag |
+
+Key derivation is HKDF-SHA-256 of the 32-byte recovery secret with the stored salt and UTF-8 `info = "Laveyana.Security/portable-key-recovery/aes-256-gcm/v1"`, producing a 32-byte wrapping key.
+
+Authenticated associated data are the exact concatenation of UTF-8 `"Laveyana.Security/portable-key-recovery/v1"`, the first 54 header bytes, a UInt16 little-endian length of `exactScope`, and the exact `exactScope` bytes. Scope is deliberately **external** to the package: restore must obtain the **expected** scope from trusted app metadata or context, not select it from an untrusted backup's claim alone.
+
+The application's encoding of scope fields MUST be deterministic, unambiguous and stable across devices and versions. Naive delimiter concatenation without escaping or length prefixes is unsafe when fields may themselves contain delimiters. Retain the exact encoding rules and expected identity alongside a consistent backup. Keep the same key ID/version bound to the same material; a valid older package is not rejected by this codec.
+
+**Compatibility rule:** never change v1 HKDF info, AAD encoding, field offsets or other cryptographic format constants while still labeling the result v1. A future changed format needs a new version and an explicitly retained reader for existing v1 packages. The independently generated fixture `tests/Laveyana.Security.Tests/Fixtures/portable-key-recovery-v1.hex` and its test pin backward readability; do not regenerate this fixture with `PortableKeyRecovery.Protect` during a test.

@@ -42,7 +42,7 @@ class NativeDependencyScopeTests(unittest.TestCase):
             "nested/rules.ruleset",
             "build/analysis.globalconfig",
             "tests/Laveyana.Security.Tests/Laveyana.Security.Tests.csproj",
-            "src/Laveyana.Security.Maui/obj/project.assets.json" if False else "Directory.Packages.props",
+            "Directory.Packages.props",
             "platforms/any/ReviewProbe.csproj",
             ".nuget/NuGet.Config",
             "platforms/android/packages.lock.json",

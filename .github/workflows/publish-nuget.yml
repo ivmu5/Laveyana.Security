@@ -1,0 +1,139 @@
+name: Publish NuGet
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nuget-release-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Validate, test and package
+    if: github.repository == 'ivmu5/Laveyana.Security'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact release commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate release tag and source
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          IS_PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+            echo "Release tag must be v<semver> (for example v1.2610.0-alpha.1)."
+            exit 1
+          fi
+          git fetch origin master --no-tags
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/master || {
+            echo "Refusing to release a commit not contained in master."
+            exit 1
+          }
+          declared="$(python3 -c 'import xml.etree.ElementTree as ET; print(ET.parse("Directory.Build.props").findtext(".//LaveyanaVersion"))')"
+          if [[ "$RELEASE_TAG" != "v$declared" ]]; then
+            echo "Tag $RELEASE_TAG differs from project version v$declared."
+            exit 1
+          fi
+          if [[ "$declared" == *-* && "$IS_PRERELEASE" != "true" ]]; then
+            echo "Pre-release versions must be marked Pre-release in GitHub."
+            exit 1
+          fi
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.4xx'
+      - name: Restore locked graph
+        run: dotnet restore Laveyana.Security.sln --locked-mode
+      - name: Release build
+        run: dotnet build Laveyana.Security.sln -c Release --no-restore -warnaserror
+      - name: Run solution tests
+        run: dotnet test Laveyana.Security.sln -c Release --no-build --no-restore
+      - name: Pack six explicitly shipping packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/nuget
+          for name in \
+            Laveyana.Security.Abstractions \
+            Laveyana.Security.FileSystem \
+            Laveyana.Security \
+            Laveyana.Security.Windows \
+            Laveyana.Security.Maui \
+            Laveyana.Security.DependencyInjection
+          do
+            dotnet pack "src/$name/$name.csproj" -c Release --no-build --no-restore -o artifacts/nuget -warnaserror
+          done
+          test "$(find artifacts/nuget -maxdepth 1 -name '*.nupkg' | wc -l)" -eq 6
+      - name: Upload immutable package candidates
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-release-packages
+          path: artifacts/nuget/*.nupkg
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish to NuGet.org (OIDC)
+    needs: prepare
+    runs-on: ubuntu-latest
+    environment: nuget-release
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download tested packages
+        uses: actions/download-artifact@v4
+        with:
+          name: nuget-release-packages
+          path: packages
+      - name: Check NuGet account configuration
+        shell: bash
+        env:
+          NUGET_USERNAME: ${{ vars.NUGET_USERNAME }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$NUGET_USERNAME" ]]; then
+            echo "Configure NUGET_USERNAME as GitHub Actions variable (NuGet.org username)."
+            exit 1
+          fi
+          test "$(find packages -maxdepth 1 -name '*.nupkg' | wc -l)" -eq 6
+      - name: Authenticate via NuGet Trusted Publishing
+        id: login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: ${{ vars.NUGET_USERNAME }}
+      - name: Publish packages in dependency order
+        shell: bash
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: |
+          set -euo pipefail
+          for name in \
+            Laveyana.Security.Abstractions \
+            Laveyana.Security.FileSystem \
+            Laveyana.Security \
+            Laveyana.Security.Windows \
+            Laveyana.Security.Maui \
+            Laveyana.Security.DependencyInjection
+          do
+            package="$(find packages -maxdepth 1 -name "$name.*.nupkg" -print -quit)"
+            if [[ -z "$package" ]]; then
+              echo "Missing package for $name."
+              exit 1
+            fi
+            dotnet nuget push "$package" --source https://api.nuget.org/v3/index.json \
+              --api-key "$NUGET_API_KEY" --skip-duplicate
+          done

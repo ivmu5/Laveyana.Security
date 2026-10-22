@@ -1,5 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <Description>Windows DPAPI CurrentUser protection adapter for Laveyana.Security. Windows user-profile scoped, not portable or rollback-resistant.</Description>
+  </PropertyGroup>
+  <PropertyGroup>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>

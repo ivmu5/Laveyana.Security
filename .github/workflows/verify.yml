@@ -152,6 +152,22 @@ jobs:
         run: dotnet test tests/Laveyana.Security.IntegrationTests/Laveyana.Security.IntegrationTests.csproj --no-build --no-restore -c Release --logger "trx;LogFileName=integration.trx" --results-directory artifacts/test-results/integration
       - name: Ensure platform tests actually passed
         run: python tools/check_trx.py --platform ${{ matrix.platform }} --results-dir artifacts/test-results
+      - name: Pack six NuGet libraries (no publish)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/nuget
+          for name in \
+            Laveyana.Security.Abstractions \
+            Laveyana.Security.FileSystem \
+            Laveyana.Security \
+            Laveyana.Security.Windows \
+            Laveyana.Security.Maui \
+            Laveyana.Security.DependencyInjection
+          do
+            dotnet pack "src/$name/$name.csproj" -c Release --no-build --no-restore -o artifacts/nuget -warnaserror
+          done
+          test "$(find artifacts/nuget -maxdepth 1 -name '*.nupkg' | wc -l)" -eq 6
       - name: Publish test reports
         if: always()
         uses: actions/upload-artifact@v4

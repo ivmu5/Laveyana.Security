@@ -27,8 +27,8 @@ dotnet restore platforms/android/Laveyana.Security.Maui.Android/Laveyana.Securit
 dotnet build platforms/android/Laveyana.Security.Maui.Android/Laveyana.Security.Maui.Android.csproj -c Release --no-restore
 ```
 
-A dedicated GitHub Actions workflow compiles this project; ordinary Windows/
-Linux solution CI does **not** compile Android-specific code. The workflow
+The required Verify workflow compiles Android conditionally for affected
+changes, while the standalone native workflow is manual-only. The workflow
 restore regenerates a candidate lock locally; before adding this project to
 the release solution, commit a genuine platform lock file and enable locked
 restore. Physical device and emulator tests are still needed.

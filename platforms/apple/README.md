@@ -43,7 +43,7 @@ dotnet restore platforms/apple/Laveyana.Security.Maui.Apple/Laveyana.Security.Ma
 dotnet build platforms/apple/Laveyana.Security.Maui.Apple/Laveyana.Security.Maui.Apple.csproj -c Release --no-restore
 ```
 
-The dedicated Apple GitHub Actions workflow checks **compilation only**.
+The mandatory Verify workflow conditionally checks **Apple compilation only** for affected changes; its dedicated standalone workflow is manual-only.
 Run a signing roundtrip on an actual iOS device and on a supported Mac after
 reviewing the project. This candidate still needs project-local authentic
 NuGet lock files and a release gate before packaging.

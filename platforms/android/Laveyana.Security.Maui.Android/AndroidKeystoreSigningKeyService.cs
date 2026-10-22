@@ -161,13 +161,13 @@ public sealed class AndroidKeystoreSigningKeyService : INativeSigningKeyService
         return privateKey;
     }
 
-    private static NativeSigningKeyInfo ReadVerifiedInfo(Java.Security.KeyStore store,
+    private NativeSigningKeyInfo ReadVerifiedInfo(Java.Security.KeyStore store,
         string alias, KeyId keyId)
     {
         _ = RequireHardwareKey(store, alias);
         byte[] spki = store.GetCertificate(alias)?.PublicKey?.GetEncoded()
             ?? throw new CryptographicException("Signing public key is unavailable.");
-        return new NativeSigningKeyInfo(keyId, spki);
+        return new NativeSigningKeyInfo(ProviderId, keyId, spki);
     }
 
     private string Alias(KeyId keyId)

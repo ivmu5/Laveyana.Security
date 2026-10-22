@@ -56,7 +56,7 @@ public sealed class WindowsTpmSigningKeyService : INativeSigningKeyService
 
         using CngKey key = CngKey.Create(CngAlgorithm.ECDsaP256, name, parameters);
         using ECDsaCng signer = new(key);
-        return ValueTask.FromResult(new NativeSigningKeyInfo(keyId, signer.ExportSubjectPublicKeyInfo()));
+        return ValueTask.FromResult(new NativeSigningKeyInfo(ProviderId, keyId, signer.ExportSubjectPublicKeyInfo()));
     }
 
     /// <inheritdoc />
@@ -73,7 +73,7 @@ public sealed class WindowsTpmSigningKeyService : INativeSigningKeyService
         using CngKey key = OpenRequired(name);
         using ECDsaCng signer = new(key);
         return ValueTask.FromResult<NativeSigningKeyInfo?>(
-            new NativeSigningKeyInfo(keyId, signer.ExportSubjectPublicKeyInfo()));
+            new NativeSigningKeyInfo(ProviderId, keyId, signer.ExportSubjectPublicKeyInfo()));
     }
 
     /// <inheritdoc />

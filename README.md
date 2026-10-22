@@ -84,7 +84,7 @@ This example is not a key-management or authentication protocol. For managed key
 
 ## Verification
 
-The attached source export contains no `.github/workflows` files. The workflow descriptions below are historical project configuration, not freshly verified CI state; no remote workflow was modified or reconstructed. The monthly/manual regression policy is unchanged.
+The repository includes live GitHub Actions workflows. Required PR and post-merge checks validate source, Linux and Windows; conditional Android/Apple compilation is now a prerequisite of the required `Source & docs` check when native dependencies change. Standalone platform workflows are manually dispatched. The first-of-month/manual extended regression policy is unchanged.
 
 Install the SDK selected by [`global.json`](global.json) (.NET SDK `10.0.400`, `latestPatch` within the 10.0.4xx feature band). NuGet lock files are committed; normal CI restores them in locked mode.
 

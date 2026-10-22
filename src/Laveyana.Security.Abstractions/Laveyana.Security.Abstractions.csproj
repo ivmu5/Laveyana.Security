@@ -1,2 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <Description>Public identities and abstractions for Laveyana cryptography, key management and provider integration. Pre-release API.</Description>
+  </PropertyGroup>
 </Project>

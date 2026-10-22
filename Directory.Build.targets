@@ -1,0 +1,18 @@
+<Project>
+  <!-- Evaluated after each .csproj: production packages opt in to IsPackable=true. -->
+  <PropertyGroup Condition="'$(IsPackable)' == 'true'">
+    <Authors>ivmu5</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/ivmu5/Laveyana.Security</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ivmu5/Laveyana.Security</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>laveyana;security;cryptography;dotnet10;preview</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsPackable)' == 'true'">
+    <None Include="$(MSBuildThisFileDirectory)docs/nuget/NuGetPackage.md"
+          Pack="true"
+          PackagePath="README.md" />
+  </ItemGroup>
+</Project>

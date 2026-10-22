@@ -1,4 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <Description>EXPERIMENTAL / TEST ONLY filesystem-backed key store for Laveyana.Security. NOT approved for production secrets or irreplaceable keys.</Description>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Laveyana.Security.Abstractions/Laveyana.Security.Abstractions.csproj" />
   </ItemGroup>

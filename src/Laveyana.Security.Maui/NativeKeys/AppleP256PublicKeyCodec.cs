@@ -36,11 +36,20 @@ public static class AppleP256PublicKeyCodec
         byte[] spki = writer.Encode();
         // Parse and validate the point against the NIST P-256 curve. Merely
         // wrapping arbitrary bytes in an ASN.1 container is insufficient.
-        using ECDsa validator = ECDsa.Create();
-        validator.ImportSubjectPublicKeyInfo(spki, out int consumed);
-        if (consumed != spki.Length || validator.KeySize != 256)
+        try
         {
-            throw new CryptographicException("Invalid NIST P-256 public key.");
+            using ECDsa validator = ECDsa.Create();
+            validator.ImportSubjectPublicKeyInfo(spki, out int consumed);
+            if (consumed != spki.Length || validator.KeySize != 256)
+            {
+                throw new CryptographicException("Invalid NIST P-256 public key.");
+            }
+        }
+        catch (PlatformNotSupportedException exception)
+        {
+            // Windows CNG can report an off-curve point as an unsupported
+            // curve. Normalize that fail-closed validation error.
+            throw new CryptographicException("P-256 public key validation failed.", exception);
         }
 
         return spki;

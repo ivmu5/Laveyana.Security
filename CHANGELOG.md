@@ -125,3 +125,5 @@ The historical entries below describe the evidence available when each change wa
 | 25 | Opt-in logging, metrics, tracing, best-effort audit | Source prepared; .NET/NUnit unverified |
 
 See [Roadmap](docs/design/Laveyana.Security.Roadmap.md), [Decision Log](docs/design/Laveyana.Security.DecisionLog.md) and [README](README.md) for detailed capabilities and blockers. Phase 27 has a partial static review, but the **full security acceptance remains open**.
+
+<!-- CI-only smoke: intentionally docs-only, do not merge. -->

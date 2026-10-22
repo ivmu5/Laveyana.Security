@@ -93,6 +93,19 @@ The real Windows TPM create/sign/delete test requires an explicit
 persistent key after process termination. It is intentionally skipped by
 default; passing CI **does not prove TPM hardware functionality**.
 
-Android Keystore and Apple Secure Enclave integrations are **not implemented**.
+Apple Secure Enclave is **not implemented**; Android has only a separately compiled, unverified candidate.
 This component is experimental and not accepted for production secrets or a
 stable NuGet release; SA-03/04/08 remain open.
+
+## Android hardware signing candidate (separate workload)
+
+An **experimental**, separately compiled `platforms/android/Laveyana.Security.Maui.Android`
+assembly implements the same `INativeSigningKeyService` contract using
+Android Keystore on Android 12+ (API 31+). It rejects keys whose reported
+security level is not TEE or StrongBox and provides ECDSA P-256/SHA-256
+signing with 64-byte IEEE P1363 results.
+
+This candidate is not in the default solution, does not run on Windows/Linux,
+and has no on-device acceptance yet. A platform-specific compile workflow is
+separate from core CI. See [Android module](../../platforms/android/README.md).
+No key attestation, user-presence policy, CAS, or rollback guarantee is implied.

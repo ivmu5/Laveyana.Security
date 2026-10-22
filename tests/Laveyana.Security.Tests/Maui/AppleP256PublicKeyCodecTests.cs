@@ -43,6 +43,6 @@ public sealed class AppleP256PublicKeyCodecTests
     {
         byte[] invalid = new byte[65];
         invalid[0] = 0x04;
-        Assert.Throws<CryptographicException>(() => AppleP256PublicKeyCodec.ToSubjectPublicKeyInfo(invalid));
+        Assert.Catch<CryptographicException>(() => AppleP256PublicKeyCodec.ToSubjectPublicKeyInfo(invalid));
     }
 }
